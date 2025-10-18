@@ -1,0 +1,35 @@
+
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Chrome AI Raw Boilerplate</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <h1>Chrome AI (Raw)</h1>
+
+    <section>
+      <h2>Status</h2>
+      <div id="status" class="muted">Checking availability…</div>
+    </section>
+
+    <section>
+      <h2>Summarize this page</h2>
+      <button id="btn-sum">Summarize</button>
+      <span id="sum-progress" class="progress"></span>
+      <pre id="sum-out" class="out"></pre>
+    </section>
+
+    <section>
+      <h2>Ask Gemini Nano</h2>
+      <input id="prompt" placeholder="Ask about this page…">
+      <button id="btn-prompt">Run</button>
+      <span id="prompt-progress" class="progress"></span>
+      <pre id="prompt-out" class="out"></pre>
+    </section>
+
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>
