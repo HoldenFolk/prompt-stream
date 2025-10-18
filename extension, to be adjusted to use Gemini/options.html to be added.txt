@@ -1,0 +1,5 @@
+<div class="row">
+  <label for="userTpls">Custom templates (JSON)</label>
+  <textarea id="userTpls" rows="10" style="width:620px;"></textarea>
+  <div><small>Schema: [{ id, title, mode, description, system, user (function body or string with ${text}), detect (function body) }]</small></div>
+</div>

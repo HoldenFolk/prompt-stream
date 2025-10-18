@@ -1,0 +1,52 @@
+// contentScript.js (add at the top)
+import { suggestTemplate } from "./promptEngine.js";
+
+let suggested = null;
+
+// After you set lastSelectionText in mouseup handler:
+document.addEventListener("mouseup", async () => {
+  const { text, rect } = getSelectionInfo();
+  lastSelectionText = text;
+  lastRect = rect;
+
+  if (!text || !rect) { hideToolbar(); return; }
+
+  // Compute suggestion
+  try {
+    suggested = await suggestTemplate(lastSelectionText); // local, no network
+    // Update toolbar UI
+    const pill = toolbar?.querySelector(".ps-suggested");
+    if (pill) {
+      pill.textContent = `Suggested: ${suggested.tpl.title} (${Math.round(suggested.score*100)}%)`;
+      pill.style.display = "inline-flex";
+    }
+  } catch {
+    suggested = null;
+  }
+
+  const x = rect.right + window.scrollX + 6;
+  const y = rect.top + window.scrollY - 6;
+  showToolbar(x, y);
+});
+
+// In createToolbar(), add a suggested pill and an Auto button:
+wrap.innerHTML = `
+  <div class="ps-card">
+    <div class="ps-suggest-row">
+      <span class="ps-suggested" style="display:none;"></span>
+      <button class="ps-btn" data-action="auto" title="Run suggested action">Auto</button>
+    </div>
+    <button class="ps-btn" data-action="summarize" title="Summarize">Summarize</button>
+    <button class="ps-btn" data-action="facts" title="Key facts">Key Facts</button>
+    <div class="ps-ask-row">
+      <input type="text" placeholder="Ask a question…" class="ps-input" />
+      <button class="ps-btn" data-action="ask" title="Ask">Ask</button>
+    </div>
+    <button class="ps-close" title="Close">×</button>
+  </div>
+`;
+
+// Handle Auto:
+if (action === "auto") runAction("auto");
+
+// runAction now just passes mode through (background picks template when mode==="auto")
