@@ -1,35 +1,45 @@
-
 <!doctype html>
-<html>
+<html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Chrome AI Raw Boilerplate</title>
-    <link rel="stylesheet" href="styles.css">
+    <meta charset="utf-8" />
+    <title>Gemini Nano Page</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <h1>Chrome AI (Raw)</h1>
+    <header>
+      <h2>PromptStream</h2>
+      <p class="subtitle">Streamline your everyday prompting</p>
+    </header>
 
-    <section>
-      <h2>Status</h2>
-      <div id="status" class="muted">Checking availability…</div>
-    </section>
+    <main>
+      <label for="system">System instruction (optional)</label>
+      <input id="system" placeholder="You are a concise assistant." />
 
-    <section>
-      <h2>Summarize this page</h2>
-      <button id="btn-sum">Summarize</button>
-      <span id="sum-progress" class="progress"></span>
-      <pre id="sum-out" class="out"></pre>
-    </section>
+      <div class="button-row">
+        <button id="init">Init / Download model</button>
+        <button id="run" disabled>Run prompt</button>
+        <button id="stop" disabled>Stop</button>
+      </div>
 
-    <section>
-      <h2>Ask Gemini Nano</h2>
-      <input id="prompt" placeholder="Ask about this page…">
-      <button id="btn-prompt">Run</button>
-      <span id="prompt-progress" class="progress"></span>
-      <pre id="prompt-out" class="out"></pre>
-    </section>
+      <div id="status">Status: Not initialized</div>
 
-    <script src="popup.js" type="module"></script>
+      <div id="progressWrap" class="hidden">
+        <p>Model download progress:</p>
+        <progress id="progress" value="0" max="100"></progress>
+        <small id="progressNote"></small>
+      </div>
+
+      <section class="output">
+        <h3>Output</h3>
+        <pre id="out"></pre>
+      </section>
+    </main>
+
+    <footer>
+      <small>Runs locally via Chrome’s built-in Gemini Nano</small>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
   </body>
 </html>
