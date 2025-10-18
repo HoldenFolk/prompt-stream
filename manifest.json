@@ -20,6 +20,13 @@
     "scripting",
     "storage"
   ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "host_permissions": [
     "<all_urls>"
   ],
