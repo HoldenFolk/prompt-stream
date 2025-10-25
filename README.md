@@ -12,6 +12,7 @@ Plain HTML/JS/CSS Chrome extension showcasing **Summarizer API** and **Prompt AP
 ## Use
 - **Summarize this page**: clicks use user activation; if the model isn't present, Chrome downloads it (progress shown).
 - **Ask Gemini Nano**: prompts the on-device model; includes the current page text as context.
+- This extension: A multi-modal Gemini assistant that instantly turns any text into three levels of understanding — Simple, Deep, and Expert.
 
 ## Permissions
 - `activeTab`, `scripting` (to read page text), `storage` (reserved for future settings).
