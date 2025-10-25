@@ -100,14 +100,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg?.type === MSG.CS_TO_BG_SEND_TO_POPUP) {
+  if (msg?.type === "CS_TO_BG_SEND_TO_POPUP") {
     const payload = msg.payload ?? { prompt: "", pageContent: "" };
     (async () => {
       // Try to deliver live to any open popup
       const views = await chrome.runtime.getViews({ type: "popup" });
       if (views.length > 0) {
         // Popup is open — broadcast
-        chrome.runtime.sendMessage({ type: MSG.POPUP_PAYLOAD_DELIVER, payload });
+        chrome.runtime.sendMessage({ type: "POPUP_PAYLOAD_DELIVER", payload });
       } else {
         // Popup closed — cache in session storage
         await chrome.storage.session.set({ [STORAGE_KEYS.POPUP_PAYLOAD]: payload });
