@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Gemini Prompt Tags — Options</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 24px; }
+      label { display:block; margin-top:16px; }
+      input, textarea { width: 520px; max-width: 100%; padding: 8px; }
+      .hint { color:#666; font-size: 12px; }
+      button { margin-top:16px; padding:8px 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Gemini Prompt Tags — Options</h1>
+
+    <label>
+      Gemini Base URL
+      <input id="baseUrl" type="url" placeholder="https://gemini.google.com/app" />
+      <div class="hint">
+        The prompt is appended as ?query=... and also copied to clipboard.
+      </div>
+    </label>
+
+    <label>
+      Prompt Prefix
+      <textarea id="prefix" rows="3" placeholder="Explain this:\n\n"></textarea>
+      <div class="hint">
+        This gets prepended to the selected text. Good for context, like “Summarize this”, “Translate this”, etc.
+      </div>
+    </label>
+
+    <label>
+      Max Prompt Length
+      <input id="maxLen" type="number" min="80" step="20" />
+    </label>
+
+    <button id="save">Save</button>
+
+    <script>
+      (function(){
+        var baseUrlEl = document.getElementById('baseUrl');
+        var prefixEl = document.getElementById('prefix');
+        var maxLenEl = document.getElementById('maxLen');
+        var saveBtn = document.getElementById('save');
+
+        var defaults = {
+          baseUrl: 'https://gemini.google.com/app',
+          prefix: 'Explain this:\\n\\n',
+          maxLen: 500
+        };
+
+        try {
+          chrome.storage.sync.get(['baseUrl', 'prefix', 'maxLen'], function (cfg) {
+            baseUrlEl.value = (cfg && cfg.baseUrl) || defaults.baseUrl;
+            prefixEl.value = (cfg && typeof cfg.prefix === 'string') ? cfg.prefix : defaults.prefix;
+            maxLenEl.value = (cfg && typeof cfg.maxLen === 'number') ? cfg.maxLen : defaults.maxLen;
+          });
+        } catch (e) {
+          baseUrlEl.value = defaults.baseUrl;
+          prefixEl.value = defaults.prefix;
+          maxLenEl.value = defaults.maxLen;
+        }
+
+        saveBtn.addEventListener('click', function () {
+          var baseUrl = baseUrlEl.value.trim() || defaults.baseUrl;
+          var prefix = prefixEl.value;
+          var maxLen = Number(maxLenEl.value) || defaults.maxLen;
+
+          try {
+            chrome.storage.sync.set({ baseUrl: baseUrl, prefix: prefix, maxLen: maxLen }, function () {
+              saveBtn.textContent = 'Saved!';
+              setTimeout(function(){ saveBtn.textContent = 'Save'; }, 1200);
+            });
+          } catch (e) {
+            // storage might not be available in some restricted contexts
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>
