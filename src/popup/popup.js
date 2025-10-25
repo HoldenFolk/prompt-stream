@@ -5,7 +5,6 @@ import { setStatus, showProgress, setProgress } from "../ui/status.js";
 import { getAvailability } from "../ai/apiShim.js";
 
 const client = new ModelClient();
-let lastClickedText = "";
 
 // Auto-init if model is already downloaded
 document.addEventListener("DOMContentLoaded", async () => {
@@ -31,6 +30,80 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 });
 
+// --- Config ---
+const STORAGE_KEY = "systemPrompt";
+
+// --- Helpers ---
+function debounce(fn, delay = 300) {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn(...args), delay);
+  };
+}
+
+const storage = (() => {
+  // Prefer chrome.storage.session; fallback to localStorage if not available (non-Chrome/older).
+  const hasChromeSession = typeof chrome !== "undefined" &&
+                           chrome.storage &&
+                           chrome.storage.session &&
+                           typeof chrome.storage.session.get === "function";
+
+  return {
+    async get(key) {
+      if (hasChromeSession) {
+        const obj = await chrome.storage.session.get(key);
+        return obj[key];
+      }
+      return Promise.resolve(localStorage.getItem(key) ?? "");
+    },
+    async set(key, value) {
+      if (hasChromeSession) {
+        await chrome.storage.session.set({ [key]: value });
+        return;
+      }
+      localStorage.setItem(key, value);
+    }
+  };
+})();
+
+// --- Main ---
+document.addEventListener("DOMContentLoaded", async () => {
+  const promptEl = els.system;
+
+  // 1) Restore saved value when the popup opens
+  try {
+    const saved = (await storage.get(STORAGE_KEY)) ?? "";
+    if (saved) {
+      promptEl.value = saved;
+      // If your UI reacts to input events (e.g., autosize), re-emit:
+      promptEl.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  } catch (e) {
+    // Non-fatal; just log for debugging
+    console.warn("Failed to restore prompt:", e);
+  }
+
+  // 2) Debounced saving on input
+  const saveDraft = debounce(async (value) => {
+    try {
+      await storage.set(STORAGE_KEY, value);
+    } catch (e) {
+      console.warn("Failed to save prompt:", e);
+    }
+  }, 300);
+
+  promptEl.addEventListener("input", () => {
+    saveDraft(promptEl.value);
+  });
+
+  // Optional: save immediately on blur so nothing is lost if user closes fast
+  promptEl.addEventListener("blur", () => {
+    storage.set(STORAGE_KEY, promptEl.value).catch(() => {});
+  });
+});
+
+
 // Manual init/download (first-time setup)
 els.init.addEventListener("click", async () => {
   els.init.disabled = true;
@@ -51,18 +124,18 @@ els.init.addEventListener("click", async () => {
   }
 });
 
-// Listen for clicks from the content script
-chrome.runtime.onMessage.addListener(async (msg) => {
-  if (msg?.type === "ELEMENT_CLICKED_PROMPT") {
-    lastClickedText = msg.text;
-    setStatus("Running prompt from clicked element...");
-    await runPromptFromText(lastClickedText);
-  }
+els.run.addEventListener("click", async () => {
+
+  const systemText = els.system.value;
+  const userText = els.prompt.value;
+
+  await runPromptFromText(`${systemText}\n\n${userText}`);
 });
 
 async function runPromptFromText(text) {
   if (!client.isReady) {
     setStatus(UI_STRINGS.initFirst);
+    console.log("system is not ready");
     return;
   }
 

@@ -1,69 +1,29 @@
-import { getAvailability, createSession } from "./apiShim.js";
+import { SessionManager } from "./sessionManager.js";
+import { PromptSuggester } from "./promptSuggester.js";
+import { SYSTEM_SUGGESTER_TEXT } from "./constants.js";
 
 export class ModelClient {
-  #session = null;
-  #controller = null;
+  #sessionMgr;
+  #suggester;
 
-  get isReady() {
-    return !!this.#session;
+  constructor(deps) {
+    this.#sessionMgr = new SessionManager(deps);
+    this.#suggester   = new PromptSuggester(this.#sessionMgr);
   }
 
-  async ensureReady({ systemText, onStatus, onProgress, params } = {}) {
-    const availability = await getAvailability();
-    onStatus?.(`Availability: ${availability}`);
+  get isReady() { return this.#sessionMgr.isReady; }
 
-    if (availability === "unavailable") {
-      throw new Error("Model unavailable on this device.");
+  ensureReady(opts) { return this.#sessionMgr.ensureReady(opts); }
+  abort() { return this.#sessionMgr.abort(); }
+  prompt(text) { return this.#sessionMgr.prompt(text); }
+  promptStream(text) { return this.#sessionMgr.promptStream(text); }
+
+  /** NEW: same name as before, but routed to the modular service */
+  async suggestPromptsFor(text, { tone, n, onStatus } = {}) {
+    // If someone passes in systemText via ensureReady elsewhere, we won’t override; otherwise set it here.
+    if (!this.isReady) {
+      await this.ensureReady({ systemText: SYSTEM_SUGGESTER_TEXT, onStatus });
     }
-
-    this.#controller = new AbortController();
-    const hasSystem = !!(systemText && systemText.trim());
-
-    this.#session = await createSession({
-      signal: this.#controller.signal,
-      ...(hasSystem
-        ? { initialPrompts: [{ role: "system", content: systemText.trim() }] }
-        : {}),
-      ...(params ? params : {}),
-
-      monitor(m) {
-        m.addEventListener("downloadprogress", (e) => {
-          const pct = Math.round((e.loaded ?? 0) * 100);
-          onProgress?.(pct, e.loaded ?? 0);
-          onStatus?.(`Downloading model… ${pct}%`);
-        });
-      },
-    });
-
-    onStatus?.("Model ready");
-    return this.#session;
-  }
-
-  abort() {
-    try {
-      this.#controller?.abort();
-      this.#session?.destroy?.();
-    } catch {}
-    this.#session = null;
-  }
-
-  async prompt(text) {
-    if (!this.#session) throw new Error("Session not initialized.");
-    return this.#session.prompt(text ?? "");
-  }
-
-  async *promptStream(text) {
-    if (!this.#session) throw new Error("Session not initialized.");
-    const stream = await this.#session.promptStreaming(text ?? "");
-    const reader = stream.getReader();
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        yield value;
-      }
-    } finally {
-      reader.releaseLock?.();
-    }
+    return this.#suggester.suggest(text, { tone, n, onStatus });
   }
 }

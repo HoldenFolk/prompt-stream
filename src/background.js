@@ -1,3 +1,7 @@
+// background.js (service worker)
+import { ModelClient } from "./modelClient.js";
+import { MSG, STORAGE_KEYS } from "./ai/constants.js";
+
 // Opens Gemini and injects the provided prompt into the input box.
 chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
   if (!msg || msg.type !== "OPEN_GEMINI" || typeof msg.prompt !== "string") return;
@@ -76,3 +80,41 @@ chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
     chrome.tabs.onUpdated.addListener(onUpdated);
   });
 });
+
+const client = new ModelClient();
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === "SUGGEST_PROMPTS") {
+    const { text, tone, n } = msg || {};
+    (async () => {
+      try {
+        const prompts = await client.suggestPromptsFor(text ?? "", { tone, n });
+        sendResponse({ ok: true, prompts });
+      } catch (err) {
+        console.warn("SUGGEST_PROMPTS error:", err);
+        sendResponse({ ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true; // keep the message channel open for async response
+  }
+});
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === MSG.CS_TO_BG_SEND_TO_POPUP) {
+    const payload = msg.payload ?? { prompt: "", pageContent: "" };
+    (async () => {
+      // Try to deliver live to any open popup
+      const views = await chrome.runtime.getViews({ type: "popup" });
+      if (views.length > 0) {
+        // Popup is open — broadcast
+        chrome.runtime.sendMessage({ type: MSG.POPUP_PAYLOAD_DELIVER, payload });
+      } else {
+        // Popup closed — cache in session storage
+        await chrome.storage.session.set({ [STORAGE_KEYS.POPUP_PAYLOAD]: payload });
+      }
+      sendResponse({ ok: true });
+    })();
+    return true; // async
+  }
+});
+
