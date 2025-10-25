@@ -83,6 +83,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
 
 const client = new ModelClient();
 
+
+/*
+Is called with a text and tone and "N". The text is the highlighted text that the user selects and the tone 
+is the tone for the model response, and the N is the numebr of responses
+*/
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === "SUGGEST_PROMPTS") {
     const { text, tone, n } = msg || {};
@@ -99,22 +104,58 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+// Keys you already have
+const STORAGE_KEYS = { POPUP_PAYLOAD: "popup-payload" };
+
+
+/* 
+This listener take a "prompt" and a "pageContent". I will then use this in the popup and generate the resopnse for the user.
+*/
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === "CS_TO_BG_SEND_TO_POPUP") {
     const payload = msg.payload ?? { prompt: "", pageContent: "" };
+
     (async () => {
-      // Try to deliver live to any open popup
-      const views = await chrome.runtime.getViews({ type: "popup" });
-      if (views.length > 0) {
-        // Popup is open — broadcast
-        chrome.runtime.sendMessage({ type: "POPUP_PAYLOAD_DELIVER", payload });
-      } else {
-        // Popup closed — cache in session storage
+      try {
+        const views = await chrome.runtime.getViews({ type: "popup" });
+
+        if (views.length > 0) {
+          // Popup already open → deliver immediately
+          chrome.runtime.sendMessage({ type: "POPUP_PAYLOAD_DELIVER", payload });
+        } else {
+          // Popup closed → cache then open it
+          await chrome.storage.session.set({ [STORAGE_KEYS.POPUP_PAYLOAD]: payload });
+
+          await chrome.action.openPopup(
+            sender?.tab?.windowId ? { windowId: sender.tab.windowId } : {}
+          );
+          // When the popup initializes, it will ask for POPUP_READY and we'll deliver from storage.
+        }
+
+        sendResponse({ ok: true });
+      } catch (err) {
+        console.warn("openPopup error:", err);
+        // Fallback: if openPopup fails, at least cache so the popup can pull it next time it opens.
         await chrome.storage.session.set({ [STORAGE_KEYS.POPUP_PAYLOAD]: payload });
+        sendResponse({ ok: false, error: String(err?.message || err) });
       }
-      sendResponse({ ok: true });
     })();
-    return true; // async
+
+    return true; // keep channel open for async sendResponse
+  }
+
+  // One-shot handshake: popup tells us it's ready; we pass any cached payload.
+  if (msg?.type === "POPUP_READY") {
+    (async () => {
+      const obj = await chrome.storage.session.get(STORAGE_KEYS.POPUP_PAYLOAD);
+      const cached = obj?.[STORAGE_KEYS.POPUP_PAYLOAD];
+      if (cached) {
+        chrome.runtime.sendMessage({ type: "POPUP_PAYLOAD_DELIVER", payload: cached });
+        await chrome.storage.session.remove(STORAGE_KEYS.POPUP_PAYLOAD);
+      }
+    })();
+    // No sendResponse needed
   }
 });
+
 
