@@ -4,7 +4,7 @@
   "description": "Minimal MV3 extension using Chrome Built\u2011in AI (Prompt + Summarizer) with plain HTML/JS/CSS.",
   "version": "0.1.0",
   "action": {
-    "default_popup": "popup.html",
+    "default_popup": "./src/popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -12,7 +12,7 @@
     }
   },
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "./src/background.js",
     "type": "module"
   },
   "permissions": [
@@ -25,12 +25,12 @@
     {
       "matches": ["<all_urls>"],
       "exclude_matches": ["https://gemini.google.com/*"],
-      "js": ["content_select.js"],
+      "js": ["./src/content/content_select.js"],
       "run_at": "document_idle"
     },
     {
       "matches": ["https://gemini.google.com/*"],
-      "js": ["content_gemini.js"],
+      "js": ["./src/content/content_gemini.js"],
       "run_at": "document_idle"
     }
   ],
@@ -43,5 +43,5 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "options_page": "options.html"
+  "options_page": "./src/options.html"
 }
