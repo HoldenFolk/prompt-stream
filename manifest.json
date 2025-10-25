@@ -4,7 +4,7 @@
   "description": "Minimal MV3 extension using Chrome Built\u2011in AI (Prompt + Summarizer) with plain HTML/JS/CSS.",
   "version": "0.1.0",
   "action": {
-    "default_popup": "./src/popup.html",
+    "default_popup": "./src/popup/popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

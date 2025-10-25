@@ -1,8 +1,8 @@
-import { DEFAULT_PARAMS, UI_STRINGS } from "./src/config.js";
-import { ModelClient } from "./src/ai/modelClient.js";
-import { els } from "./src/ui/dom.js";
-import { setStatus, showProgress, setProgress } from "./src/ui/status.js";
-import { getAvailability } from "./src/ai/apiShim.js";
+import { DEFAULT_PARAMS, UI_STRINGS } from "../config.js";
+import { ModelClient } from "../ai/modelClient.js";
+import { els } from "../ui/dom.js";
+import { setStatus, showProgress, setProgress } from "../ui/status.js";
+import { getAvailability } from "../ai/apiShim.js";
 
 const client = new ModelClient();
 let lastClickedText = "";
