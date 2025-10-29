@@ -8,10 +8,11 @@
   const SELECT_ALL_KEY = "a";
   const KEYBOARD_SELECTION_KEYS = new Set(["Shift", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
   const POSITION_OFFSET = 8;
+  const TRANSITION_MS = 200;
   const DIALOG_TITLE = "Suggested prompts:";
   const DEFAULT_TONE = "neutral";
   const DEFAULT_SUGGESTION_COUNT = 3;
-  const FALLBACK_PROMPTS = ["Simple", "In depth", "Expert level"];
+  const FALLBACK_PROMPTS = ["Sample prompt 1", "Sample prompt 2", "Sample prompt 3"];
   const LOADING_PROMPTS = ["Loading suggestions…"];
 
   const state = {
@@ -122,6 +123,15 @@
       "  flex-direction: column;",
       "  gap: 8px;",
       "  box-sizing: border-box;",
+      "  max-height: 0px;",
+      "  overflow: hidden;",
+      "  opacity: 0;",
+      "  transform: scale(0.98);",
+      "  pointer-events: none;",
+      `  transition: max-height ${TRANSITION_MS}ms ease, opacity ${TRANSITION_MS}ms ease, transform ${TRANSITION_MS}ms ease;`,
+      "}",
+      `#${TAG_ID} div {`,
+      "  transition: inherit;",
       "}",
       `#${TAG_ID} .gemini-dialog-title {`,
       "  font-weight: 600;",
@@ -290,7 +300,7 @@
       markAsFinal: hasSuggestions
     });
     tag.dataset.selectionSignature = selectionKey || "";
-    tag.style.display = "flex";
+    ensureTagVisible(tag);
 
     const pageX = position.clientX + window.scrollX;
     const pageY = position.clientY + window.scrollY;
@@ -316,6 +326,59 @@
       button.disabled = isLoading || !label;
       button.style.display = label ? "block" : "none";
     });
+    updateTagSize(container);
+  }
+
+  function ensureTagVisible(tag) {
+    if (!tag) return;
+    if (tag._hideTimer) {
+      window.clearTimeout(tag._hideTimer);
+      tag._hideTimer = null;
+    }
+    const wasHidden = tag.style.display === "none";
+    tag.style.display = "flex";
+    if (!wasHidden && tag.style.opacity === "1") {
+      tag.style.pointerEvents = "auto";
+      updateTagSize(tag);
+      return;
+    }
+    window.requestAnimationFrame(function () {
+      tag.style.pointerEvents = "auto";
+      tag.style.opacity = "1";
+      tag.style.transform = "scale(1)";
+      updateTagSize(tag);
+    });
+  }
+
+  function updateTagSize(tag) {
+    if (!tag || tag.style.display === "none") return;
+    const prevMax = tag.style.maxHeight && tag.style.maxHeight !== "none" ? tag.style.maxHeight : "0px";
+    tag.style.maxHeight = "none";
+    const targetHeight = tag.scrollHeight;
+    const targetValue = `${targetHeight}px`;
+    tag.style.maxHeight = prevMax;
+    // Force reflow to ensure the transition triggers
+    void tag.offsetHeight;
+    tag.style.maxHeight = targetValue;
+  }
+
+  function animateTagClose(tag) {
+    if (!tag) return;
+    if (tag._hideTimer) {
+      window.clearTimeout(tag._hideTimer);
+      tag._hideTimer = null;
+    }
+    if (tag.style.display === "none") return;
+    tag.style.pointerEvents = "none";
+    updateTagSize(tag);
+    void tag.offsetHeight;
+    tag.style.opacity = "0";
+    tag.style.transform = "scale(0.98)";
+    tag.style.maxHeight = "0px";
+    tag._hideTimer = window.setTimeout(function () {
+      tag.style.display = "none";
+      tag._hideTimer = null;
+    }, TRANSITION_MS);
   }
 
   function requestSuggestions(selectedText, basePrompt, selectionKey) {
@@ -384,13 +447,13 @@
 
   function hideTag() {
     if (!tagElement) return;
-    tagElement.style.display = "none";
+    animateTagClose(tagElement);
+    clearSuggestionTimeout(tagElement);
     tagElement.dataset.selectionPrompt = "";
     tagElement.dataset.selectionSignature = "";
     tagElement.dataset.hasSuggestions = "false";
     tagElement.dataset.isLoading = "false";
     tagElement.dataset.suggestionRequestId = "";
-    clearSuggestionTimeout(tagElement);
   }
 
   function isTagVisible() {
@@ -462,6 +525,7 @@
       populateOptions(tagElement, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true });
       tagElement.dataset.suggestionRequestId = "";
       tagElement.dataset.isLoading = "false";
+      tagElement.dataset.suggestionTimeoutId = "";
     }, 5000);
     container.dataset.suggestionTimeoutId = String(timeoutId);
   }
