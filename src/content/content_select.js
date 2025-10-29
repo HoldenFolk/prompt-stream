@@ -9,7 +9,10 @@
   const KEYBOARD_SELECTION_KEYS = new Set(["Shift", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
   const POSITION_OFFSET = 8;
   const DIALOG_TITLE = "Suggested prompts:";
-  const SAMPLE_PROMPTS = ["Sample prompt 1", "Sample prompt 2", "Sample prompt 3"];
+  const DEFAULT_TONE = "neutral";
+  const DEFAULT_SUGGESTION_COUNT = 3;
+  const FALLBACK_PROMPTS = ["Simple", "In depth", "Expert level"];
+  const LOADING_PROMPTS = ["Loading suggestions…"];
 
   const state = {
     maxLen: DEFAULT_MAX_LEN,
@@ -18,6 +21,7 @@
   };
 
   let tagElement = null;
+  let suggestionRequestCounter = 0;
 
   init();
 
@@ -81,7 +85,7 @@
     optionsContainer.className = "gemini-dialog-options";
     el.appendChild(optionsContainer);
 
-    const optionButtons = SAMPLE_PROMPTS.map(function (_, index) {
+    const optionButtons = new Array(DEFAULT_SUGGESTION_COUNT).fill(null).map(function (_unused, index) {
       const button = document.createElement("button");
       button.type = "button";
       button.dataset.optionIndex = String(index);
@@ -107,7 +111,7 @@
       "  z-index: 2147483647;",
       "  background: #f2f2f2;",
       "  border: 1px solid #d9d9d9;",
-      "  border-radius: 8px;",
+      "  border-radius: 12px;",
       "  padding: 12px;",
       "  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;",
       "  color: #333;",
@@ -196,7 +200,7 @@
       return;
     }
 
-    const prompt = buildPrompt(selectedText);
+    const { prompt, truncated } = buildPrompt(selectedText);
     const range = getFirstRange(selection);
     if (!range) {
       hideTag();
@@ -206,12 +210,31 @@
     const rect = range.getBoundingClientRect();
     const position = resolvePosition(rect, triggerEvent);
 
-    showTag(prompt, position);
+    const selectionKey = buildSelectionKey(prompt, truncated);
+    const tag = tagElement;
+    const sameSelection = Boolean(tag && tag.dataset.selectionSignature === selectionKey);
+    const hasFinalSuggestions = sameSelection && tag.dataset.hasSuggestions === "true";
+    const isLoading = sameSelection && tag.dataset.isLoading === "true";
+    const existingOptions = sameSelection ? collectOptionTemplates(tag) : null;
+    const optionsToUse =
+      existingOptions && existingOptions.length ? existingOptions : LOADING_PROMPTS;
+
+    showTag(prompt, position, selectionKey, optionsToUse, {
+      isLoading: !hasFinalSuggestions,
+      hasSuggestions: hasFinalSuggestions
+    });
+
+    if (!hasFinalSuggestions && !isLoading) {
+      requestSuggestions(truncated, prompt, selectionKey);
+    }
   }
 
   function buildPrompt(selectedText) {
     const truncated = truncateText(selectedText, state.maxLen);
-    return (state.prefix + truncated).trim();
+    return {
+      prompt: (state.prefix + truncated).trim(),
+      truncated
+    };
   }
 
   function getFirstRange(selection) {
@@ -244,10 +267,29 @@
     };
   }
 
-  function showTag(prompt, position) {
+  function buildSelectionKey(prompt, truncatedText) {
+    return `${prompt}|${truncatedText}`;
+  }
+
+  function collectOptionTemplates(container) {
+    if (!container) return [];
+    const buttons = container._optionButtons || [];
+    const options = buttons.map(function (button) {
+      return button.dataset.promptTemplate || "";
+    });
+    return options.some(Boolean) ? options : [];
+  }
+
+  function showTag(prompt, position, selectionKey, options, { isLoading = false, hasSuggestions = false } = {}) {
     const tag = tagElement || ensureTagElement();
     tagElement = tag;
-    populateOptions(tag, SAMPLE_PROMPTS, prompt);
+    const resolvedOptions =
+      options && options.length ? options : (hasSuggestions ? FALLBACK_PROMPTS : LOADING_PROMPTS);
+    populateOptions(tag, resolvedOptions, prompt, {
+      isLoading,
+      markAsFinal: hasSuggestions
+    });
+    tag.dataset.selectionSignature = selectionKey || "";
     tag.style.display = "flex";
 
     const pageX = position.clientX + window.scrollX;
@@ -262,16 +304,78 @@
     tag.style.top = `${pageY}px`;
   }
 
-  function populateOptions(container, options, basePrompt) {
+  function populateOptions(container, options, basePrompt, { isLoading = false, markAsFinal = false } = {}) {
     container.dataset.selectionPrompt = basePrompt;
+    container.dataset.hasSuggestions = markAsFinal ? "true" : "false";
+    container.dataset.isLoading = isLoading ? "true" : "false";
     const buttons = container._optionButtons || [];
     buttons.forEach(function (button, index) {
       const label = options[index] || "";
       button.textContent = label;
       button.dataset.promptTemplate = label;
-      button.disabled = !label;
+      button.disabled = isLoading || !label;
       button.style.display = label ? "block" : "none";
     });
+  }
+
+  function requestSuggestions(selectedText, basePrompt, selectionKey) {
+    const container = tagElement;
+    if (!container) return;
+
+    if (!chrome || !chrome.runtime || typeof chrome.runtime.sendMessage !== "function") {
+      container.dataset.suggestionRequestId = "";
+      populateOptions(container, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true });
+      return;
+    }
+
+    const requestId = ++suggestionRequestCounter;
+    container.dataset.suggestionRequestId = String(requestId);
+    scheduleSuggestionTimeout(requestId, basePrompt);
+
+    try {
+      chrome.runtime.sendMessage(
+        {
+          type: "SUGGEST_PROMPTS",
+          text: selectedText,
+          tone: DEFAULT_TONE,
+          n: DEFAULT_SUGGESTION_COUNT
+        },
+        function (response) {
+          const runtimeError = chrome.runtime.lastError;
+          const tag = tagElement;
+          if (!tag) return;
+          if (tag.dataset.selectionSignature !== selectionKey) return;
+          if (tag.dataset.suggestionRequestId !== String(requestId)) return;
+          clearSuggestionTimeout(tag);
+
+          if (runtimeError) {
+            populateOptions(tag, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true });
+            tag.dataset.suggestionRequestId = "";
+            return;
+          }
+
+          const prompts = Array.isArray(response?.prompts)
+            ? response.prompts.map(function (p) {
+                return String(p || "").trim();
+              }).filter(Boolean)
+            : [];
+
+          if (!response || response.ok !== true || !prompts.length) {
+            populateOptions(tag, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true });
+            tag.dataset.suggestionRequestId = "";
+            return;
+          }
+
+          const limited = prompts.slice(0, DEFAULT_SUGGESTION_COUNT);
+          populateOptions(tag, limited, basePrompt, { markAsFinal: true });
+          tag.dataset.suggestionRequestId = "";
+        }
+      );
+    } catch (err) {
+      clearSuggestionTimeout(container);
+      populateOptions(container, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true });
+      container.dataset.suggestionRequestId = "";
+    }
   }
 
   function repositionTag() {
@@ -282,6 +386,11 @@
     if (!tagElement) return;
     tagElement.style.display = "none";
     tagElement.dataset.selectionPrompt = "";
+    tagElement.dataset.selectionSignature = "";
+    tagElement.dataset.hasSuggestions = "false";
+    tagElement.dataset.isLoading = "false";
+    tagElement.dataset.suggestionRequestId = "";
+    clearSuggestionTimeout(tagElement);
   }
 
   function isTagVisible() {
@@ -317,6 +426,7 @@
     const container = tagElement;
     if (!container) return;
 
+    clearSuggestionTimeout(container);
     const basePrompt = container.dataset.selectionPrompt || "";
     const optionTemplate = button.dataset.promptTemplate || "";
     const fullPrompt = buildOptionPrompt(optionTemplate, basePrompt);
@@ -340,5 +450,27 @@
     if (maxLength <= 0) return "";
     const sliceLength = Math.max(maxLength - ELLIPSIS.length, 0);
     return text.slice(0, sliceLength) + ELLIPSIS;
+  }
+
+  function scheduleSuggestionTimeout(requestId, basePrompt) {
+    const container = tagElement;
+    if (!container) return;
+    clearSuggestionTimeout(container);
+    const timeoutId = window.setTimeout(function () {
+      if (!tagElement) return;
+      if (tagElement.dataset.suggestionRequestId !== String(requestId)) return;
+      populateOptions(tagElement, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true });
+      tagElement.dataset.suggestionRequestId = "";
+      tagElement.dataset.isLoading = "false";
+    }, 5000);
+    container.dataset.suggestionTimeoutId = String(timeoutId);
+  }
+
+  function clearSuggestionTimeout(container) {
+    if (!container) return;
+    const timeoutId = container.dataset.suggestionTimeoutId;
+    if (!timeoutId) return;
+    window.clearTimeout(Number(timeoutId));
+    container.dataset.suggestionTimeoutId = "";
   }
 })();
