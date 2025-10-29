@@ -3,12 +3,13 @@
   const STYLE_ID = "gemini-selection-style";
   const DEFAULT_MAX_LEN = 500;
   const MIN_SELECTION_LENGTH = 5;
-  const DEFAULT_TAG_WIDTH = 140;
-  const TAG_LABEL = "✨Analyze";
+  const DEFAULT_DIALOG_WIDTH = 260;
   const ELLIPSIS = "...";
   const SELECT_ALL_KEY = "a";
   const KEYBOARD_SELECTION_KEYS = new Set(["Shift", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
   const POSITION_OFFSET = 8;
+  const DIALOG_TITLE = "Suggested prompts:";
+  const SAMPLE_PROMPTS = ["Sample prompt 1", "Sample prompt 2", "Sample prompt 3"];
 
   const state = {
     maxLen: DEFAULT_MAX_LEN,
@@ -69,18 +70,27 @@
     const el = document.createElement("div");
     el.id = TAG_ID;
     el.style.display = "none";
-    el.dataset.geminiPrompt = "";
+    el.dataset.selectionPrompt = "";
 
-    el.addEventListener("click", function handleTagClick(event) {
-      event.preventDefault();
-      event.stopPropagation();
+    const title = document.createElement("div");
+    title.className = "gemini-dialog-title";
+    title.textContent = DIALOG_TITLE;
+    el.appendChild(title);
 
-      const prompt = el.dataset.geminiPrompt || "";
-      if (!prompt) return;
+    const optionsContainer = document.createElement("div");
+    optionsContainer.className = "gemini-dialog-options";
+    el.appendChild(optionsContainer);
 
-      copyToClipboard(prompt);
-      openGemini(prompt);
+    const optionButtons = SAMPLE_PROMPTS.map(function (_, index) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.optionIndex = String(index);
+      button.addEventListener("click", handleOptionClick);
+      optionsContainer.appendChild(button);
+      return button;
     });
+
+    el._optionButtons = optionButtons;
 
     document.documentElement.appendChild(el);
     return el;
@@ -98,18 +108,44 @@
       "  background: #f2f2f2;",
       "  border: 1px solid #d9d9d9;",
       "  border-radius: 8px;",
-      "  padding: 6px 10px;",
-      "  font-size: 12px;",
-      "  line-height: 1.3;",
+      "  padding: 12px;",
       "  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;",
       "  color: #333;",
       "  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);",
-      "  cursor: pointer;",
       "  user-select: none;",
-      "  white-space: nowrap;",
+      "  max-width: 400px;",
+      "  display: flex;",
+      "  flex-direction: column;",
+      "  gap: 8px;",
+      "  box-sizing: border-box;",
       "}",
-      `#${TAG_ID}:hover { filter: brightness(0.98); }`,
-      `#${TAG_ID}:active { filter: brightness(0.95); }`
+      `#${TAG_ID} .gemini-dialog-title {`,
+      "  font-weight: 600;",
+      "  font-size: 13px;",
+      "  line-height: 1.4;",
+      "}",
+      `#${TAG_ID} .gemini-dialog-options {`,
+      "  display: flex;",
+      "  flex-direction: column;",
+      "  gap: 6px;",
+      "}",
+      `#${TAG_ID} .gemini-dialog-options button {`,
+      "  margin: 0;",
+      "  padding: 8px 10px;",
+      "  font-size: 12px;",
+      "  line-height: 1.4;",
+      "  border-radius: 6px;",
+      "  border: 1px solid #ccc;",
+      "  background: #d9d9d9;",
+      "  cursor: pointer;",
+      "  text-align: left;",
+      "  white-space: normal;",
+      "  word-break: break-word;",
+      "  width: 100%;",
+      "  box-sizing: border-box;",
+      "}",
+      `#${TAG_ID} .gemini-dialog-options button:hover { filter: brightness(0.98); }`,
+      `#${TAG_ID} .gemini-dialog-options button:active { filter: brightness(0.95); }`
     ].join("\n");
 
     (document.head || document.documentElement).appendChild(style);
@@ -211,13 +247,12 @@
   function showTag(prompt, position) {
     const tag = tagElement || ensureTagElement();
     tagElement = tag;
-    tag.dataset.geminiPrompt = prompt;
-    tag.textContent = TAG_LABEL;
-    tag.style.display = "block";
+    populateOptions(tag, SAMPLE_PROMPTS, prompt);
+    tag.style.display = "flex";
 
     const pageX = position.clientX + window.scrollX;
     const pageY = position.clientY + window.scrollY;
-    const width = tag.offsetWidth || DEFAULT_TAG_WIDTH;
+    const width = tag.offsetWidth || DEFAULT_DIALOG_WIDTH;
     const viewportWidth = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
     const minLeft = window.scrollX;
     const maxLeft = minLeft + viewportWidth - width - POSITION_OFFSET;
@@ -227,6 +262,18 @@
     tag.style.top = `${pageY}px`;
   }
 
+  function populateOptions(container, options, basePrompt) {
+    container.dataset.selectionPrompt = basePrompt;
+    const buttons = container._optionButtons || [];
+    buttons.forEach(function (button, index) {
+      const label = options[index] || "";
+      button.textContent = label;
+      button.dataset.promptTemplate = label;
+      button.disabled = !label;
+      button.style.display = label ? "block" : "none";
+    });
+  }
+
   function repositionTag() {
     processSelection(null);
   }
@@ -234,7 +281,7 @@
   function hideTag() {
     if (!tagElement) return;
     tagElement.style.display = "none";
-    tagElement.dataset.geminiPrompt = "";
+    tagElement.dataset.selectionPrompt = "";
   }
 
   function isTagVisible() {
@@ -260,6 +307,32 @@
   function openGemini(prompt) {
     const url = `${state.baseUrl}?query=${encodeURIComponent(prompt)}`;
     window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  function handleOptionClick(event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const button = event.currentTarget;
+    const container = tagElement;
+    if (!container) return;
+
+    const basePrompt = container.dataset.selectionPrompt || "";
+    const optionTemplate = button.dataset.promptTemplate || "";
+    const fullPrompt = buildOptionPrompt(optionTemplate, basePrompt);
+
+    copyToClipboard(fullPrompt);
+    openGemini(fullPrompt);
+  }
+
+  function buildOptionPrompt(optionTemplate, basePrompt) {
+    const trimmedTemplate = optionTemplate.trim();
+    const trimmedBase = basePrompt.trim();
+    if (trimmedTemplate && trimmedBase) {
+      return `${trimmedTemplate}\n\n${trimmedBase}`;
+    }
+    if (trimmedTemplate) return trimmedTemplate;
+    return trimmedBase;
   }
 
   function truncateText(text, maxLength) {
