@@ -526,7 +526,7 @@
       tagElement.dataset.suggestionRequestId = "";
       tagElement.dataset.isLoading = "false";
       tagElement.dataset.suggestionTimeoutId = "";
-    }, 5000);
+    }, 8000);
     container.dataset.suggestionTimeoutId = String(timeoutId);
   }
 
