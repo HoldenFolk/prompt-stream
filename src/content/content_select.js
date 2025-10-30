@@ -31,33 +31,33 @@
 
   let tagElement = null;
   let suggestionRequestCounter = 0;
+  let storageListenerRegistered = false;
 
   init();
 
   function init() {
-    if (canUseSyncStorage()) {
-      loadSettings();
+    const storage = getStorageArea();
+    if (storage) {
+      loadSettings(storage);
       return;
     }
     setup();
   }
 
-  function canUseSyncStorage() {
-    return (
-      typeof chrome !== "undefined" &&
-      chrome.storage &&
-      chrome.storage.sync &&
-      typeof chrome.storage.sync.get === "function"
-    );
+  function getStorageArea() {
+    if (typeof chrome === "undefined" || !chrome.storage) return null;
+    if (chrome.storage.sync && typeof chrome.storage.sync.get === "function") {
+      return chrome.storage.sync;
+    }
+    if (chrome.storage.local && typeof chrome.storage.local.get === "function") {
+      return chrome.storage.local;
+    }
+    return null;
   }
 
-  function loadSettings() {
-    if (!canUseSyncStorage()) {
-      setup();
-      return;
-    }
+  function loadSettings(storage) {
     try {
-      chrome.storage.sync.get(
+      storage.get(
         [
           "maxLen",
           "baseUrl",
@@ -67,10 +67,12 @@
         ],
         function (cfg) {
           applyConfig(cfg);
+          registerStorageListener();
           setup();
         }
       );
     } catch (err) {
+      registerStorageListener();
       setup();
     }
   }
@@ -123,6 +125,11 @@
       button.type = "button";
       button.dataset.optionIndex = String(index);
       button.style.display = "none";
+      button.style.whiteSpace = "normal";
+      button.style.wordBreak = "break-word";
+      button.style.textAlign = "left";
+      button.style.height = "auto";
+      button.style.minHeight = "auto";
       button.disabled = true;
       button.addEventListener("click", handleOptionClick);
       optionsContainer.appendChild(button);
@@ -152,7 +159,8 @@
       "  color: #333;",
       "  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);",
       "  user-select: none;",
-      "  max-width: 400px;",
+      "  max-width: min(420px, 90vw);",
+      "  width: fit-content;",
       "  display: flex;",
       "  flex-direction: column;",
       "  gap: 8px;",
@@ -613,27 +621,34 @@
     container.dataset.suggestionTimeoutId = "";
   }
 
-  if (canUseSyncStorage()) {
+  function registerStorageListener() {
+    if (storageListenerRegistered) return;
+    const storage = getStorageArea();
+    if (!storage) return;
+    storageListenerRegistered = true;
+
     try {
-      chrome.storage.sync.get(
+      storage.get(
         [SETTINGS_KEYS.SUGGESTION_COUNT, SETTINGS_KEYS.SUGGESTION_TONE],
         function (cfg) {
           if (chrome.runtime?.lastError) return;
           applyDynamicSettings(cfg || {});
         }
       );
-      chrome.storage.onChanged?.addListener(function (changes, areaName) {
-        if (areaName !== "sync") return;
-        const delta = {};
-        if (Object.prototype.hasOwnProperty.call(changes, SETTINGS_KEYS.SUGGESTION_COUNT)) {
-          delta[SETTINGS_KEYS.SUGGESTION_COUNT] = changes[SETTINGS_KEYS.SUGGESTION_COUNT].newValue;
-        }
-        if (Object.prototype.hasOwnProperty.call(changes, SETTINGS_KEYS.SUGGESTION_TONE)) {
-          delta[SETTINGS_KEYS.SUGGESTION_TONE] = changes[SETTINGS_KEYS.SUGGESTION_TONE].newValue;
-        }
-        applyDynamicSettings(delta);
-      });
     } catch {}
+
+    if (!chrome?.storage?.onChanged) return;
+    chrome.storage.onChanged.addListener(function (changes, areaName) {
+      if (areaName !== "sync" && areaName !== "local") return;
+      const delta = {};
+      if (Object.prototype.hasOwnProperty.call(changes, SETTINGS_KEYS.SUGGESTION_COUNT)) {
+        delta[SETTINGS_KEYS.SUGGESTION_COUNT] = changes[SETTINGS_KEYS.SUGGESTION_COUNT].newValue;
+      }
+      if (Object.prototype.hasOwnProperty.call(changes, SETTINGS_KEYS.SUGGESTION_TONE)) {
+        delta[SETTINGS_KEYS.SUGGESTION_TONE] = changes[SETTINGS_KEYS.SUGGESTION_TONE].newValue;
+      }
+      applyDynamicSettings(delta);
+    });
   }
 
   function applyDynamicSettings(cfg) {
@@ -661,9 +676,11 @@
       if (index < limit) {
         if (button.dataset.promptTemplate) {
           button.style.display = "block";
+          button.disabled = false;
         }
       } else {
         button.style.display = "none";
+        button.disabled = true;
       }
     });
   }

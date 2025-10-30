@@ -1,14 +1,24 @@
 import { getAvailability, createSession } from "./apiShim.js";
-import { USER_SETTINGS_KEYS, USER_SETTINGS_DEFAULTS } from "./constants.js";
+import {
+  USER_SETTINGS_KEYS,
+  USER_SETTINGS_DEFAULTS,
+} from "./constants.js";
 
-const hasSyncStorage =
-  typeof chrome !== "undefined" &&
-  !!chrome.storage &&
-  !!chrome.storage.sync &&
-  typeof chrome.storage.sync.get === "function";
+const DEFAULT_LANGUAGE = "en";
+
+const storageArea = (() => {
+  if (typeof chrome === "undefined" || !chrome.storage) return null;
+  if (chrome.storage.sync && typeof chrome.storage.sync.get === "function") {
+    return chrome.storage.sync;
+  }
+  if (chrome.storage.local && typeof chrome.storage.local.get === "function") {
+    return chrome.storage.local;
+  }
+  return null;
+})();
 
 async function loadModelParams() {
-  if (!hasSyncStorage) {
+  if (!storageArea) {
     return {
       temperature: USER_SETTINGS_DEFAULTS[USER_SETTINGS_KEYS.MODEL_TEMPERATURE],
       topK: USER_SETTINGS_DEFAULTS[USER_SETTINGS_KEYS.MODEL_TOP_K],
@@ -21,7 +31,7 @@ async function loadModelParams() {
   ];
 
   const stored = await new Promise((resolve) => {
-    chrome.storage.sync.get(keys, (items) => {
+    storageArea.get(keys, (items) => {
       if (chrome.runtime?.lastError) {
         resolve({});
         return;
@@ -36,12 +46,14 @@ async function loadModelParams() {
     2,
     USER_SETTINGS_DEFAULTS[USER_SETTINGS_KEYS.MODEL_TEMPERATURE]
   );
-  const topK = Math.round(clampNumber(
-    stored?.[USER_SETTINGS_KEYS.MODEL_TOP_K],
-    1,
-    40,
-    USER_SETTINGS_DEFAULTS[USER_SETTINGS_KEYS.MODEL_TOP_K]
-  ));
+  const topK = Math.round(
+    clampNumber(
+      stored?.[USER_SETTINGS_KEYS.MODEL_TOP_K],
+      1,
+      40,
+      USER_SETTINGS_DEFAULTS[USER_SETTINGS_KEYS.MODEL_TOP_K]
+    )
+  );
 
   return { temperature, topK };
 }
@@ -80,12 +92,45 @@ export class SessionManager {
     this.#controller = new AbortController();
     const hasSystem = !!(systemText && systemText.trim());
 
-    const modelParams = params || await loadModelParams();
+    const storedParams = await loadModelParams();
+    const temperature = clampNumber(
+      params?.temperature ?? storedParams.temperature,
+      0,
+      2,
+      USER_SETTINGS_DEFAULTS[USER_SETTINGS_KEYS.MODEL_TEMPERATURE]
+    );
+    const topK = Math.round(
+      clampNumber(
+        params?.topK ?? storedParams.topK,
+        1,
+        40,
+        USER_SETTINGS_DEFAULTS[USER_SETTINGS_KEYS.MODEL_TOP_K]
+      )
+    );
+    const inputLanguages = [DEFAULT_LANGUAGE];
+    const expectedInputs = [
+      {
+        type: "text",
+        languages: inputLanguages,
+      },
+    ];
+    const expectedOutputs = [
+      {
+        type: "text",
+        languages: [DEFAULT_LANGUAGE],
+      },
+    ];
 
     this.#session = await this.#deps.createSession({
       signal: this.#controller.signal,
       ...(hasSystem ? { initialPrompts: [{ role: "system", content: systemText.trim() }] } : {}),
-      ...(modelParams ? { params: modelParams } : {}),
+      params: {
+        ...params,
+        temperature,
+        topK,
+      },
+      expectedInputs,
+      expectedOutputs,
       monitor(m) {
         m.addEventListener("downloadprogress", (e) => {
           const pct = Math.round((e.loaded ?? 0) * 100);

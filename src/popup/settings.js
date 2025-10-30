@@ -1,12 +1,21 @@
-import { USER_SETTINGS_KEYS, USER_SETTINGS_DEFAULTS } from "../ai/constants.js";
+import {
+  USER_SETTINGS_KEYS,
+  USER_SETTINGS_DEFAULTS,
+} from "../ai/constants.js";
 
-const hasSyncStorage =
-  typeof chrome !== "undefined" &&
-  !!chrome.storage &&
-  !!chrome.storage.sync &&
-  typeof chrome.storage.sync.get === "function";
+const storageArea = (() => {
+  if (typeof chrome === "undefined" || !chrome.storage) return null;
+  if (chrome.storage.sync && typeof chrome.storage.sync.get === "function") {
+    return chrome.storage.sync;
+  }
+  if (chrome.storage.local && typeof chrome.storage.local.get === "function") {
+    return chrome.storage.local;
+  }
+  return null;
+})();
 
 const localStorageFallback = typeof window !== "undefined" ? window.localStorage : null;
+const VALID_TONES = ["neutral", "friendly", "professional", "persuasive", "casual"];
 
 const els = {
   system: document.getElementById("system"),
@@ -33,9 +42,9 @@ function debounceSave(fn) {
 }
 
 async function storageGet(keys) {
-  if (hasSyncStorage) {
+  if (storageArea) {
     return new Promise((resolve) => {
-      chrome.storage.sync.get(keys, (items) => {
+      storageArea.get(keys, (items) => {
         if (chrome.runtime?.lastError) {
           resolve({});
           return;
@@ -53,9 +62,9 @@ async function storageGet(keys) {
 }
 
 async function storageSet(pairs) {
-  if (hasSyncStorage) {
+  if (storageArea) {
     await new Promise((resolve) => {
-      chrome.storage.sync.set(pairs, () => {
+      storageArea.set(pairs, () => {
         if (chrome.runtime?.lastError) {
           console.warn("Failed to persist settings:", chrome.runtime.lastError);
         }
@@ -146,7 +155,11 @@ const saveSuggestionCount = debounceSave(async (value) => {
 });
 
 const saveSuggestionTone = debounceSave(async (value) => {
-  await storageSet({ [USER_SETTINGS_KEYS.SUGGESTION_TONE]: value || USER_SETTINGS_DEFAULTS[USER_SETTINGS_KEYS.SUGGESTION_TONE] });
+  const tone =
+    typeof value === "string" && VALID_TONES.includes(value)
+      ? value
+      : USER_SETTINGS_DEFAULTS[USER_SETTINGS_KEYS.SUGGESTION_TONE];
+  await storageSet({ [USER_SETTINGS_KEYS.SUGGESTION_TONE]: tone });
   showStatus("Suggestion settings updated");
 });
 
