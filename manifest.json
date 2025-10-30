@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Chrome AI Raw Boilerplate",
-  "description": "Minimal MV3 extension using Chrome Built\u2011in AI (Prompt + Summarizer) with plain HTML/JS/CSS.",
-  "version": "0.1.0",
+  "name": "PromptStream",
+  "description": "Highlight text to request Gemini Nano suggestions, then continue the conversation in a full-page workspace.",
+  "version": "0.2.0",
   "action": {
     "default_popup": "./src/popup/popup.html",
     "default_icon": {
@@ -43,6 +43,5 @@
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  },
-  "options_page": "./src/options.html"
+  }
 }
