@@ -16,6 +16,11 @@ export class SessionManager {
   get isReady() { return !!this.#session; }
 
   async ensureReady({ systemText, onStatus, onProgress, params } = {}) {
+    if (this.#session) {
+      onStatus?.("Model ready");
+      return this.#session;
+    }
+
     const availability = await this.#deps.getAvailability();
     onStatus?.(`Availability: ${availability}`);
     if (availability === "unavailable") throw new Error("Model unavailable on this device.");
@@ -46,6 +51,7 @@ export class SessionManager {
       this.#session?.destroy?.();
     } catch {}
     this.#session = null;
+    this.#controller = null;
   }
 
   async prompt(text = "") {

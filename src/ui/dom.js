@@ -1,7 +1,8 @@
 // Centralized DOM lookups so popup.js stays lean
 export const els = {
     init:     document.getElementById("init"),
-    run:      document.getElementById("run"),
+    send:     document.getElementById("send"),
+    reset:    document.getElementById("reset"),
     stop:     document.getElementById("stop"),
     status:   document.getElementById("status"),
     progressWrap: document.getElementById("progressWrap"),
@@ -9,6 +10,7 @@ export const els = {
     progressNote: document.getElementById("progressNote"),
     prompt:   document.getElementById("prompt"),
     system:   document.getElementById("system"),
-    out:      document.getElementById("out"),
+    chatBox:  document.getElementById("chatBox"),
+    chatLog:  document.getElementById("chatLog"),
   };
   

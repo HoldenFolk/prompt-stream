@@ -1,5 +1,4 @@
 // background.js (service worker)
-import { ModelClient } from "./modelClient.js";
 import { MSG, STORAGE_KEYS } from "./ai/constants.js";
 
 // Opens Gemini and injects the provided prompt into the input box.
@@ -81,8 +80,51 @@ chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
   });
 });
 
-const client = new ModelClient();
+async function ensureOffscreenDocument() {
+  if (!chrome.offscreen) {
+    throw new Error("Offscreen API unavailable.");
+  }
 
+  const hasDoc = await chrome.offscreen.hasDocument?.();
+  if (hasDoc) return;
+
+  await chrome.offscreen.createDocument({
+    url: chrome.runtime.getURL("src/offscreen/offscreen.html"),
+    reasons: [chrome.offscreen.Reason.DOM_PARSER],
+    justification: "Generate Gemini prompt suggestions for selections."
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function requestPromptSuggestions({ text, tone, n }) {
+  await ensureOffscreenDocument();
+
+  const maxAttempts = 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "OFFSCREEN_SUGGEST_PROMPTS",
+        text,
+        tone,
+        n
+      });
+      if (!response || response.ok !== true) {
+        const error = response?.error ? String(response.error) : "Unknown error";
+        throw new Error(error);
+      }
+      return response.prompts ?? [];
+    } catch (err) {
+      const message = String(err?.message || err);
+      const canRetry = message.includes("Receiving end does not exist") && attempt < maxAttempts - 1;
+      if (!canRetry) throw err;
+      await sleep(150);
+    }
+  }
+  throw new Error("Unable to reach offscreen document.");
+}
 
 /*
 Is called with a text and tone and "N". The text is the highlighted text that the user selects and the tone 
@@ -93,7 +135,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const { text, tone, n } = msg || {};
     (async () => {
       try {
-        const prompts = await client.suggestPromptsFor(text ?? "", { tone, n });
+        const prompts = await requestPromptSuggestions({
+          text: text ?? "",
+          tone,
+          n
+        });
         sendResponse({ ok: true, prompts });
       } catch (err) {
         console.warn("SUGGEST_PROMPTS error:", err);
@@ -103,10 +149,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // keep the message channel open for async response
   }
 });
-
-// Keys you already have
-const STORAGE_KEYS = { POPUP_PAYLOAD: "popup-payload" };
-
 
 /* 
 This listener take a "prompt" and a "pageContent". I will then use this in the popup and generate the resopnse for the user.

@@ -18,13 +18,10 @@
 
       <div class="button-row">
         <button id="init">Init / Download model</button>
-        <button id="run" disabled>Run prompt</button>
-        <button id="stop" disabled>Stop</button>
+        <button id="reset" disabled>Reset chat</button>
       </div>
 
       <div id="status">Status: Not initialized</div>
-
-      <input id="prompt" placeholder="You are a concise assistant." />
 
       <div id="progressWrap" class="hidden">
         <p>Model download progress:</p>
@@ -32,10 +29,20 @@
         <small id="progressNote"></small>
       </div>
 
-      <section class="output">
-        <h3>Output</h3>
-        <pre id="out"></pre>
+      <section class="chat">
+        <h3>Conversation</h3>
+        <div id="chatBox">
+          <div id="chatLog"></div>
+        </div>
       </section>
+
+      <label for="prompt">Message</label>
+      <textarea id="prompt" placeholder="Type your message…"></textarea>
+
+      <div class="button-row">
+        <button id="send" disabled>Send</button>
+        <button id="stop" disabled>Stop</button>
+      </div>
     </main>
 
     <footer>

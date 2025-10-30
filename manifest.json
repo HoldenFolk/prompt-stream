@@ -19,7 +19,8 @@
     "activeTab",
     "scripting",
     "storage",
-    "clipboardWrite"
+    "clipboardWrite",
+    "offscreen"
   ],
   "content_scripts": [
     {
