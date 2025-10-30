@@ -1,6 +1,73 @@
 // background.js (service worker)
 import { MSG, STORAGE_KEYS } from "./ai/constants.js";
 
+const offscreenState = {
+  ready: false,
+  promise: null,
+  resolve: null,
+  pingScheduled: false
+};
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+function resetOffscreenReady() {
+  const deferred = createDeferred();
+  offscreenState.ready = false;
+  offscreenState.promise = deferred.promise;
+  offscreenState.resolve = deferred.resolve;
+  offscreenState.pingScheduled = false;
+}
+
+function markOffscreenReady() {
+  if (offscreenState.ready) return;
+  offscreenState.ready = true;
+  offscreenState.resolve?.();
+  offscreenState.promise = null;
+  offscreenState.resolve = null;
+  offscreenState.pingScheduled = false;
+}
+
+function ensureOffscreenDeferred() {
+  if (!offscreenState.promise) {
+    const deferred = createDeferred();
+    offscreenState.promise = deferred.promise;
+    offscreenState.resolve = deferred.resolve;
+    offscreenState.pingScheduled = false;
+  }
+}
+
+function pingOffscreenDocument() {
+  if (!chrome?.runtime?.sendMessage) return;
+  try {
+    chrome.runtime.sendMessage(
+      { type: MSG.OFFSCREEN_PING },
+      () => {
+        void chrome.runtime?.lastError;
+      }
+    );
+  } catch (err) {
+    console.warn("Offscreen ping failed:", err);
+  }
+}
+
+async function waitForOffscreenReady() {
+  if (offscreenState.ready) return;
+  ensureOffscreenDeferred();
+  if (!offscreenState.pingScheduled) {
+    offscreenState.pingScheduled = true;
+    pingOffscreenDocument();
+  }
+  await offscreenState.promise;
+}
+
+resetOffscreenReady();
+
 // Opens Gemini and injects the provided prompt into the input box.
 chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
   if (!msg || msg.type !== "OPEN_GEMINI" || typeof msg.prompt !== "string") return;
@@ -86,13 +153,20 @@ async function ensureOffscreenDocument() {
   }
 
   const hasDoc = await chrome.offscreen.hasDocument?.();
-  if (hasDoc) return;
+  if (hasDoc) {
+    await waitForOffscreenReady();
+    return;
+  }
+
+  resetOffscreenReady();
 
   await chrome.offscreen.createDocument({
     url: chrome.runtime.getURL("src/offscreen/offscreen.html"),
     reasons: [chrome.offscreen.Reason.DOM_PARSER],
     justification: "Generate Gemini prompt suggestions for selections."
   });
+
+  await waitForOffscreenReady();
 }
 
 function sleep(ms) {
@@ -137,6 +211,30 @@ async function deliverPayloadToChat(payload, sender) {
   await chrome.storage.session.set({ [STORAGE_KEYS.POPUP_PAYLOAD]: payload });
   await openChatTab(sender);
   return "queued";
+}
+
+function broadcastModelReady() {
+  if (!chrome?.tabs?.query) return;
+  chrome.tabs.query({}, (tabs) => {
+    if (chrome.runtime?.lastError) {
+      console.warn("tabs.query failed while broadcasting model ready:", chrome.runtime.lastError);
+      return;
+    }
+    (tabs || []).forEach((tab) => {
+      if (!tab || typeof tab.id !== "number") return;
+      try {
+        chrome.tabs.sendMessage(
+          tab.id,
+          { type: MSG.MODEL_READY },
+          () => {
+            void chrome.runtime?.lastError;
+          }
+        );
+      } catch (err) {
+        console.warn("tabs.sendMessage failed:", err);
+      }
+    });
+  });
 }
 
 async function findChatTab() {
@@ -230,6 +328,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 This listener take a "prompt" and a "pageContent". I will then use this in the popup and generate the resopnse for the user.
 */
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === MSG.OFFSCREEN_READY) {
+    markOffscreenReady();
+    sendResponse?.({ ok: true });
+    return;
+  }
+
+  if (msg?.type === MSG.MODEL_READY) {
+    broadcastModelReady();
+    sendResponse?.({ ok: true });
+    return;
+  }
+
   if (msg?.type === "CS_TO_BG_SEND_TO_POPUP") {
     const payload = msg.payload ?? { prompt: "", pageContent: "" };
 

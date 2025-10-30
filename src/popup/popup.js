@@ -47,12 +47,17 @@ const storage = (() => {
         });
         if (value !== undefined) return value;
       }
-      const raw = localStorage.getItem(key);
-      if (raw === null) return "";
       try {
-        return JSON.parse(raw);
-      } catch {
-        return raw;
+        const raw = localStorage.getItem(key);
+        if (raw === null) return undefined;
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return raw;
+        }
+      } catch (err) {
+        console.warn("Local storage read failed:", err);
+        return undefined;
       }
     },
     async set(key, value) {
@@ -66,7 +71,11 @@ const storage = (() => {
           });
         });
       } else {
-        localStorage.setItem(key, JSON.stringify(value));
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+        } catch (err) {
+          console.warn("Local storage write failed:", err);
+        }
       }
     }
   };
@@ -124,6 +133,19 @@ let isStreaming = false;
 const pendingAutoRuns = [];
 let isProcessingAutoRun = false;
 
+function notifyModelReadyBroadcast() {
+  try {
+    chrome.runtime?.sendMessage?.(
+      { type: MSG.MODEL_READY },
+      () => {
+        void chrome.runtime?.lastError;
+      }
+    );
+  } catch (err) {
+    console.warn("Model ready broadcast failed:", err);
+  }
+}
+
 if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg?.type === MSG.POPUP_PAYLOAD_DELIVER) {
@@ -179,6 +201,7 @@ async function ensureModelReady({ auto = false } = {}) {
       onProgress: setProgress,
     });
     await persistModelReadyFlag(true);
+    notifyModelReadyBroadcast();
     setStatus("Model ready.");
     return true;
   } catch (err) {

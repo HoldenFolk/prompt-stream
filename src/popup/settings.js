@@ -1,4 +1,5 @@
 import {
+  MSG,
   USER_SETTINGS_KEYS,
   USER_SETTINGS_DEFAULTS,
 } from "../ai/constants.js";
@@ -322,6 +323,19 @@ async function persistModelReadyFlag(isReady) {
   }
 }
 
+function notifyModelReadyBroadcast() {
+  try {
+    chrome.runtime?.sendMessage?.(
+      { type: MSG.MODEL_READY },
+      () => {
+        void chrome.runtime?.lastError;
+      }
+    );
+  } catch (err) {
+    console.warn("Model ready broadcast failed:", err);
+  }
+}
+
 async function ensureModelReadyFromSettings() {
   if (!els.initModel || initInProgress) return;
 
@@ -344,6 +358,7 @@ async function ensureModelReadyFromSettings() {
     modelReady = true;
     await persistModelReadyFlag(true);
     setInitStatus("Model ready.");
+    notifyModelReadyBroadcast();
   } catch (err) {
     modelReady = false;
     await persistModelReadyFlag(false);

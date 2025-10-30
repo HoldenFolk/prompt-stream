@@ -20,6 +20,8 @@
     SUGGESTION_TONE: "suggestionTone"
   };
   const VALID_TONES = new Set(["neutral", "friendly", "professional", "persuasive", "casual"]);
+  const MAX_AUTO_RETRIES = 2;
+  const RETRY_DELAY_MS = 600;
 
   const state = {
     maxLen: DEFAULT_MAX_LEN,
@@ -34,6 +36,14 @@
   let storageListenerRegistered = false;
 
   init();
+
+  if (chrome?.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg?.type === "MODEL_READY") {
+        handleModelReadyNotice();
+      }
+    });
+  }
 
   function init() {
     const storage = getStorageArea();
@@ -265,7 +275,10 @@
     const selectionKey = buildSelectionKey(prompt, truncated);
     const tag = tagElement;
     const sameSelection = Boolean(tag && tag.dataset.selectionSignature === selectionKey);
-    const hasFinalSuggestions = sameSelection && tag.dataset.hasSuggestions === "true";
+    const hasFinalSuggestions =
+      sameSelection &&
+      tag.dataset.hasSuggestions === "true" &&
+      tag.dataset.isFallback !== "true";
     const isLoading = sameSelection && tag.dataset.isLoading === "true";
     const existingOptions = sameSelection ? collectOptionTemplates(tag) : null;
     const optionsToUse =
@@ -352,6 +365,10 @@
   ) {
     const tag = tagElement || ensureTagElement();
     tagElement = tag;
+    const wasSameSelection = tag.dataset.selectionSignature === selectionKey;
+    if (!wasSameSelection) {
+      clearFallbackRetry(tag);
+    }
     const resolvedOptions =
       options && options.length ? options : (hasSuggestions ? FALLBACK_PROMPTS : LOADING_PROMPTS);
     populateOptions(tag, resolvedOptions, prompt, {
@@ -465,12 +482,13 @@
     if (!chrome || !chrome.runtime || typeof chrome.runtime.sendMessage !== "function") {
       container.dataset.suggestionRequestId = "";
       populateOptions(container, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true, isFallback: true });
+      scheduleFallbackRetry(container, selectedText, basePrompt, selectionKey);
       return;
     }
 
     const requestId = ++suggestionRequestCounter;
     container.dataset.suggestionRequestId = String(requestId);
-    scheduleSuggestionTimeout(requestId, basePrompt);
+    scheduleSuggestionTimeout(requestId, basePrompt, selectedText, selectionKey);
 
     try {
       chrome.runtime.sendMessage(
@@ -491,6 +509,7 @@
           if (runtimeError) {
             populateOptions(tag, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true, isFallback: true });
             tag.dataset.suggestionRequestId = "";
+            scheduleFallbackRetry(tag, selectedText, basePrompt, selectionKey);
             return;
           }
 
@@ -503,12 +522,14 @@
           if (!response || response.ok !== true || !prompts.length) {
             populateOptions(tag, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true, isFallback: true });
             tag.dataset.suggestionRequestId = "";
+            scheduleFallbackRetry(tag, selectedText, basePrompt, selectionKey);
             return;
           }
 
           const limit = Math.min(state.suggestionCount, MAX_SUGGESTION_COUNT);
           const limited = prompts.slice(0, limit);
           populateOptions(tag, limited, basePrompt, { markAsFinal: true });
+          clearFallbackRetry(tag);
           tag.dataset.suggestionRequestId = "";
         }
       );
@@ -516,6 +537,7 @@
       clearSuggestionTimeout(container);
       populateOptions(container, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true, isFallback: true });
       container.dataset.suggestionRequestId = "";
+      scheduleFallbackRetry(container, selectedText, basePrompt, selectionKey);
     }
   }
 
@@ -527,6 +549,7 @@
     if (!tagElement) return;
     animateTagClose(tagElement);
     clearSuggestionTimeout(tagElement);
+    clearFallbackRetry(tagElement);
     tagElement.dataset.selectionPrompt = "";
     tagElement.dataset.selectionSignature = "";
     tagElement.dataset.hasSuggestions = "false";
@@ -598,7 +621,7 @@
     return text.slice(0, sliceLength) + ELLIPSIS;
   }
 
-  function scheduleSuggestionTimeout(requestId, basePrompt) {
+  function scheduleSuggestionTimeout(requestId, basePrompt, selectedText, selectionKey) {
     const container = tagElement;
     if (!container) return;
     clearSuggestionTimeout(container);
@@ -609,6 +632,7 @@
       tagElement.dataset.suggestionRequestId = "";
       tagElement.dataset.isLoading = "false";
       tagElement.dataset.suggestionTimeoutId = "";
+      scheduleFallbackRetry(tagElement, selectedText, basePrompt, selectionKey);
     }, 8000);
     container.dataset.suggestionTimeoutId = String(timeoutId);
   }
@@ -619,6 +643,55 @@
     if (!timeoutId) return;
     window.clearTimeout(Number(timeoutId));
     container.dataset.suggestionTimeoutId = "";
+  }
+
+  function clearFallbackRetry(container) {
+    if (!container) return;
+    const timerId = container.dataset.retryTimerId;
+    if (timerId) {
+      window.clearTimeout(Number(timerId));
+    }
+    container.dataset.retryTimerId = "";
+    container.dataset.retryCount = "";
+  }
+
+  function scheduleFallbackRetry(container, selectedText, basePrompt, selectionKey) {
+    if (!container) return;
+    if (!container.isConnected) return;
+    const rawCount = container.dataset.retryCount;
+    const current = Number(rawCount || "0");
+    const retries = Number.isFinite(current) && current >= 0 ? current : 0;
+    if (retries >= MAX_AUTO_RETRIES) return;
+
+    if (container.dataset.retryTimerId) {
+      window.clearTimeout(Number(container.dataset.retryTimerId));
+    }
+
+    const nextCount = retries + 1;
+    const delay = RETRY_DELAY_MS * nextCount;
+    const timerId = window.setTimeout(function () {
+      container.dataset.retryTimerId = "";
+      if (!tagElement || tagElement !== container) return;
+      if (container.dataset.selectionSignature !== selectionKey) return;
+      container.dataset.hasSuggestions = "false";
+      container.dataset.isFallback = "false";
+      container.dataset.isLoading = "false";
+      requestSuggestions(selectedText, basePrompt, selectionKey);
+    }, delay);
+
+    container.dataset.retryCount = String(nextCount);
+    container.dataset.retryTimerId = String(timerId);
+  }
+
+  function handleModelReadyNotice() {
+    if (!tagElement) return;
+    tagElement.dataset.hasSuggestions = "false";
+    tagElement.dataset.isFallback = "false";
+    tagElement.dataset.isLoading = "false";
+    tagElement.dataset.suggestionRequestId = "";
+    if (isTagVisible()) {
+      processSelection(null);
+    }
   }
 
   function registerStorageListener() {
