@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>PromptStream Workspace</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="tab.css" />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <header>
+          <h1>PromptStream</h1>
+          <p class="tagline">Work with Gemini locally in your browser.</p>
+        </header>
+
+        <section class="controls">
+          <label for="system">System instruction</label>
+          <textarea
+            id="system"
+            placeholder="You are a concise assistant who writes in bullet points."
+          ></textarea>
+
+          <div class="button-row">
+            <button id="init">Init / Download model</button>
+            <button id="reset" disabled>Reset chat</button>
+          </div>
+
+          <div id="status" class="status">Status: Not initialized</div>
+
+          <div id="progressWrap" class="progress hidden">
+            <label for="progress">Model download progress</label>
+            <progress id="progress" value="0" max="100"></progress>
+            <small id="progressNote"></small>
+          </div>
+        </section>
+      </aside>
+
+      <main class="chat-pane">
+        <section class="chat-header">
+          <h2>Conversation</h2>
+          <div class="chat-actions">
+            <button id="stop" disabled>Stop</button>
+          </div>
+        </section>
+
+        <section id="chatBox" class="chat-log">
+          <div id="chatLog"></div>
+        </section>
+
+        <section class="composer">
+          <label for="prompt">Message</label>
+          <textarea
+            id="prompt"
+            placeholder="Ask Gemini anything…"
+          ></textarea>
+          <div class="button-row composer-actions">
+            <button id="send" disabled>Send</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <footer class="app-footer">
+      <span>Runs entirely on-device using Chrome’s Gemini Nano.</span>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

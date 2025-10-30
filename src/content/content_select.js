@@ -11,14 +11,22 @@
   const TRANSITION_MS = 200;
   const DIALOG_TITLE = "Suggested prompts:";
   const DEFAULT_TONE = "neutral";
+  const MAX_SUGGESTION_COUNT = 5;
   const DEFAULT_SUGGESTION_COUNT = 3;
-  const FALLBACK_PROMPTS = ["Sample prompt 1", "Sample prompt 2", "Sample prompt 3"];
+  const FALLBACK_PROMPTS = Array.from({ length: MAX_SUGGESTION_COUNT }, (_unused, index) => `Sample prompt ${index + 1}`);
   const LOADING_PROMPTS = ["Loading suggestions…"];
+  const SETTINGS_KEYS = {
+    SUGGESTION_COUNT: "suggestionCount",
+    SUGGESTION_TONE: "suggestionTone"
+  };
+  const VALID_TONES = new Set(["neutral", "friendly", "professional", "persuasive", "casual"]);
 
   const state = {
     maxLen: DEFAULT_MAX_LEN,
     baseUrl: "https://gemini.google.com/app",
-    prefix: "Explain this:\n\n"
+    prefix: "Explain this:\n\n",
+    suggestionCount: DEFAULT_SUGGESTION_COUNT,
+    tone: DEFAULT_TONE
   };
 
   let tagElement = null;
@@ -44,11 +52,24 @@
   }
 
   function loadSettings() {
+    if (!canUseSyncStorage()) {
+      setup();
+      return;
+    }
     try {
-      chrome.storage.sync.get(["maxLen", "baseUrl", "prefix"], function (cfg) {
-        applyConfig(cfg);
-        setup();
-      });
+      chrome.storage.sync.get(
+        [
+          "maxLen",
+          "baseUrl",
+          "prefix",
+          SETTINGS_KEYS.SUGGESTION_COUNT,
+          SETTINGS_KEYS.SUGGESTION_TONE
+        ],
+        function (cfg) {
+          applyConfig(cfg);
+          setup();
+        }
+      );
     } catch (err) {
       setup();
     }
@@ -59,6 +80,16 @@
     if (typeof cfg.maxLen === "number") state.maxLen = cfg.maxLen;
     if (typeof cfg.baseUrl === "string" && cfg.baseUrl) state.baseUrl = cfg.baseUrl;
     if (typeof cfg.prefix === "string") state.prefix = cfg.prefix;
+    if (cfg[SETTINGS_KEYS.SUGGESTION_COUNT] !== undefined) {
+      state.suggestionCount = clampSuggestionCount(cfg[SETTINGS_KEYS.SUGGESTION_COUNT]);
+    }
+    if (cfg.hasOwnProperty(SETTINGS_KEYS.SUGGESTION_TONE)) {
+      const rawTone = cfg[SETTINGS_KEYS.SUGGESTION_TONE];
+      if (typeof rawTone === "string") {
+        const tone = rawTone.trim();
+        state.tone = VALID_TONES.has(tone) ? tone : DEFAULT_TONE;
+      }
+    }
   }
 
   function setup() {
@@ -66,6 +97,7 @@
     injectTagStyles();
     attachSelectionListeners();
     attachViewportListeners();
+    updateButtonLimit();
   }
 
   function ensureTagElement() {
@@ -86,10 +118,12 @@
     optionsContainer.className = "gemini-dialog-options";
     el.appendChild(optionsContainer);
 
-    const optionButtons = new Array(DEFAULT_SUGGESTION_COUNT).fill(null).map(function (_unused, index) {
+    const optionButtons = new Array(MAX_SUGGESTION_COUNT).fill(null).map(function (_unused, index) {
       const button = document.createElement("button");
       button.type = "button";
       button.dataset.optionIndex = String(index);
+      button.style.display = "none";
+      button.disabled = true;
       button.addEventListener("click", handleOptionClick);
       optionsContainer.appendChild(button);
       return button;
@@ -231,7 +265,10 @@
 
     showTag(prompt, position, selectionKey, optionsToUse, {
       isLoading: !hasFinalSuggestions,
-      hasSuggestions: hasFinalSuggestions
+      hasSuggestions: hasFinalSuggestions,
+      truncatedSelection: truncated,
+      originalSelection: selectedText,
+      sourceUrl: window.location.href || ""
     });
 
     if (!hasFinalSuggestions && !isLoading) {
@@ -284,22 +321,40 @@
   function collectOptionTemplates(container) {
     if (!container) return [];
     const buttons = container._optionButtons || [];
-    const options = buttons.map(function (button) {
-      return button.dataset.promptTemplate || "";
-    });
+    const limit = Math.min(state.suggestionCount, MAX_SUGGESTION_COUNT);
+    const options = [];
+    for (let i = 0; i < limit; i += 1) {
+      options.push(buttons[i]?.dataset?.promptTemplate || "");
+    }
     return options.some(Boolean) ? options : [];
   }
 
-  function showTag(prompt, position, selectionKey, options, { isLoading = false, hasSuggestions = false } = {}) {
+  function showTag(
+    prompt,
+    position,
+    selectionKey,
+    options,
+    {
+      isLoading = false,
+      hasSuggestions = false,
+      truncatedSelection = "",
+      originalSelection = "",
+      sourceUrl = ""
+    } = {}
+  ) {
     const tag = tagElement || ensureTagElement();
     tagElement = tag;
     const resolvedOptions =
       options && options.length ? options : (hasSuggestions ? FALLBACK_PROMPTS : LOADING_PROMPTS);
     populateOptions(tag, resolvedOptions, prompt, {
       isLoading,
-      markAsFinal: hasSuggestions
+      markAsFinal: hasSuggestions,
+      isFallback: resolvedOptions === FALLBACK_PROMPTS
     });
     tag.dataset.selectionSignature = selectionKey || "";
+    tag.dataset.selectionContext = truncatedSelection || "";
+    tag.dataset.selectionRaw = originalSelection || truncatedSelection || "";
+    tag.dataset.selectionSource = sourceUrl || window.location.href || "";
     ensureTagVisible(tag);
 
     const pageX = position.clientX + window.scrollX;
@@ -314,17 +369,31 @@
     tag.style.top = `${pageY}px`;
   }
 
-  function populateOptions(container, options, basePrompt, { isLoading = false, markAsFinal = false } = {}) {
+  function populateOptions(
+    container,
+    options,
+    basePrompt,
+    { isLoading = false, markAsFinal = false, isFallback = false } = {}
+  ) {
     container.dataset.selectionPrompt = basePrompt;
     container.dataset.hasSuggestions = markAsFinal ? "true" : "false";
     container.dataset.isLoading = isLoading ? "true" : "false";
+    container.dataset.isFallback = isFallback ? "true" : "false";
     const buttons = container._optionButtons || [];
+    const limit = Math.min(state.suggestionCount, MAX_SUGGESTION_COUNT);
     buttons.forEach(function (button, index) {
-      const label = options[index] || "";
-      button.textContent = label;
-      button.dataset.promptTemplate = label;
-      button.disabled = isLoading || !label;
-      button.style.display = label ? "block" : "none";
+      if (index < limit) {
+        const label = options[index] || "";
+        button.textContent = label;
+        button.dataset.promptTemplate = label;
+        button.disabled = isLoading || !label;
+        button.style.display = label ? "block" : "none";
+      } else {
+        button.textContent = "";
+        button.dataset.promptTemplate = "";
+        button.disabled = true;
+        button.style.display = "none";
+      }
     });
     updateTagSize(container);
   }
@@ -387,7 +456,7 @@
 
     if (!chrome || !chrome.runtime || typeof chrome.runtime.sendMessage !== "function") {
       container.dataset.suggestionRequestId = "";
-      populateOptions(container, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true });
+      populateOptions(container, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true, isFallback: true });
       return;
     }
 
@@ -400,8 +469,8 @@
         {
           type: "SUGGEST_PROMPTS",
           text: selectedText,
-          tone: DEFAULT_TONE,
-          n: DEFAULT_SUGGESTION_COUNT
+          tone: state.tone,
+          n: Math.min(state.suggestionCount, MAX_SUGGESTION_COUNT)
         },
         function (response) {
           const runtimeError = chrome.runtime.lastError;
@@ -412,7 +481,7 @@
           clearSuggestionTimeout(tag);
 
           if (runtimeError) {
-            populateOptions(tag, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true });
+            populateOptions(tag, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true, isFallback: true });
             tag.dataset.suggestionRequestId = "";
             return;
           }
@@ -424,19 +493,20 @@
             : [];
 
           if (!response || response.ok !== true || !prompts.length) {
-            populateOptions(tag, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true });
+            populateOptions(tag, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true, isFallback: true });
             tag.dataset.suggestionRequestId = "";
             return;
           }
 
-          const limited = prompts.slice(0, DEFAULT_SUGGESTION_COUNT);
+          const limit = Math.min(state.suggestionCount, MAX_SUGGESTION_COUNT);
+          const limited = prompts.slice(0, limit);
           populateOptions(tag, limited, basePrompt, { markAsFinal: true });
           tag.dataset.suggestionRequestId = "";
         }
       );
     } catch (err) {
       clearSuggestionTimeout(container);
-      populateOptions(container, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true });
+      populateOptions(container, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true, isFallback: true });
       container.dataset.suggestionRequestId = "";
     }
   }
@@ -453,32 +523,15 @@
     tagElement.dataset.selectionSignature = "";
     tagElement.dataset.hasSuggestions = "false";
     tagElement.dataset.isLoading = "false";
+    tagElement.dataset.selectionContext = "";
+    tagElement.dataset.selectionRaw = "";
+    tagElement.dataset.selectionSource = "";
+    tagElement.dataset.isFallback = "false";
     tagElement.dataset.suggestionRequestId = "";
   }
 
   function isTagVisible() {
     return Boolean(tagElement && tagElement.style.display !== "none");
-  }
-
-  function copyToClipboard(text) {
-    if (!text) return;
-    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
-      return;
-    }
-
-    try {
-      const write = navigator.clipboard.writeText(text);
-      if (write && typeof write.catch === "function") {
-        write.catch(function () {});
-      }
-    } catch (err) {
-      // noop
-    }
-  }
-
-  function openGemini(prompt) {
-    const url = `${state.baseUrl}?query=${encodeURIComponent(prompt)}`;
-    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   function handleOptionClick(event) {
@@ -489,23 +542,45 @@
     const container = tagElement;
     if (!container) return;
 
+    if (container.dataset.hasSuggestions !== "true") return;
+    if (container.dataset.isFallback === "true") return;
+
     clearSuggestionTimeout(container);
     const basePrompt = container.dataset.selectionPrompt || "";
-    const optionTemplate = button.dataset.promptTemplate || "";
-    const fullPrompt = buildOptionPrompt(optionTemplate, basePrompt);
+    const optionTemplate = (button.dataset.promptTemplate || "").trim();
+    if (!optionTemplate) return;
 
-    copyToClipboard(fullPrompt);
-    openGemini(fullPrompt);
-  }
+    const contextRaw = container.dataset.selectionRaw || "";
+    const contextTruncated = container.dataset.selectionContext || "";
+    const pageUrl = container.dataset.selectionSource || window.location.href || "";
+    const pageTitle = document.title || "";
 
-  function buildOptionPrompt(optionTemplate, basePrompt) {
-    const trimmedTemplate = optionTemplate.trim();
-    const trimmedBase = basePrompt.trim();
-    if (trimmedTemplate && trimmedBase) {
-      return `${trimmedTemplate}\n\n${trimmedBase}`;
+    const payload = {
+      kind: "run-selection-prompt",
+      suggestion: optionTemplate,
+      basePrompt,
+      contextText: contextRaw,
+      truncatedContext: contextTruncated,
+      pageUrl,
+      pageTitle,
+      createdAt: Date.now()
+    };
+
+    try {
+      chrome.runtime?.sendMessage?.(
+        {
+          type: "OPEN_POPUP_WINDOW",
+          payload
+        },
+        () => {
+          void chrome.runtime?.lastError;
+        }
+      );
+    } catch (err) {
+      console.warn("Failed to request popup window:", err);
     }
-    if (trimmedTemplate) return trimmedTemplate;
-    return trimmedBase;
+
+    hideTag();
   }
 
   function truncateText(text, maxLength) {
@@ -522,7 +597,7 @@
     const timeoutId = window.setTimeout(function () {
       if (!tagElement) return;
       if (tagElement.dataset.suggestionRequestId !== String(requestId)) return;
-      populateOptions(tagElement, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true });
+      populateOptions(tagElement, FALLBACK_PROMPTS, basePrompt, { markAsFinal: true, isFallback: true });
       tagElement.dataset.suggestionRequestId = "";
       tagElement.dataset.isLoading = "false";
       tagElement.dataset.suggestionTimeoutId = "";
@@ -537,4 +612,60 @@
     window.clearTimeout(Number(timeoutId));
     container.dataset.suggestionTimeoutId = "";
   }
+
+  if (canUseSyncStorage()) {
+    try {
+      chrome.storage.sync.get(
+        [SETTINGS_KEYS.SUGGESTION_COUNT, SETTINGS_KEYS.SUGGESTION_TONE],
+        function (cfg) {
+          if (chrome.runtime?.lastError) return;
+          applyDynamicSettings(cfg || {});
+        }
+      );
+      chrome.storage.onChanged?.addListener(function (changes, areaName) {
+        if (areaName !== "sync") return;
+        const delta = {};
+        if (Object.prototype.hasOwnProperty.call(changes, SETTINGS_KEYS.SUGGESTION_COUNT)) {
+          delta[SETTINGS_KEYS.SUGGESTION_COUNT] = changes[SETTINGS_KEYS.SUGGESTION_COUNT].newValue;
+        }
+        if (Object.prototype.hasOwnProperty.call(changes, SETTINGS_KEYS.SUGGESTION_TONE)) {
+          delta[SETTINGS_KEYS.SUGGESTION_TONE] = changes[SETTINGS_KEYS.SUGGESTION_TONE].newValue;
+        }
+        applyDynamicSettings(delta);
+      });
+    } catch {}
+  }
+
+  function applyDynamicSettings(cfg) {
+    if (!cfg) return;
+    if (cfg[SETTINGS_KEYS.SUGGESTION_COUNT] !== undefined) {
+      state.suggestionCount = clampSuggestionCount(cfg[SETTINGS_KEYS.SUGGESTION_COUNT]);
+      updateButtonLimit();
+    }
+    if (cfg.hasOwnProperty(SETTINGS_KEYS.SUGGESTION_TONE)) {
+      const tone = String(cfg[SETTINGS_KEYS.SUGGESTION_TONE] ?? "").trim();
+      state.tone = VALID_TONES.has(tone) ? tone : DEFAULT_TONE;
+    }
+  }
+
+  function clampSuggestionCount(value) {
+    const num = Number(value);
+    if (Number.isNaN(num)) return DEFAULT_SUGGESTION_COUNT;
+    return Math.min(Math.max(Math.round(num), 1), MAX_SUGGESTION_COUNT);
+  }
+
+  function updateButtonLimit() {
+    if (!tagElement || !tagElement._optionButtons) return;
+    const limit = Math.min(state.suggestionCount, MAX_SUGGESTION_COUNT);
+    tagElement._optionButtons.forEach(function (button, index) {
+      if (index < limit) {
+        if (button.dataset.promptTemplate) {
+          button.style.display = "block";
+        }
+      } else {
+        button.style.display = "none";
+      }
+    });
+  }
+
 })();

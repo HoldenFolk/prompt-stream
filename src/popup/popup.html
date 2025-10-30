@@ -2,53 +2,83 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Gemini Nano Page</title>
+    <title>PromptStream Settings</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header>
-      <h2>PromptStream</h2>
-      <p class="subtitle">Streamline your everyday prompting</p>
-    </header>
+    <div class="container">
+      <header class="header">
+        <h1>PromptStream Settings</h1>
+        <p>Configure defaults for your on-device Gemini workspace.</p>
+      </header>
 
-    <main>
-      <label for="system">System instruction (optional)</label>
-      <input id="system" placeholder="You are a concise assistant." />
+      <main class="main">
+        <section class="card">
+          <div class="card-header">
+            <h2>System Instruction</h2>
+            <p class="card-subtitle">This prompt is applied to every chat session.</p>
+          </div>
+          <textarea
+            id="system"
+            placeholder="You are a concise assistant who responds with key bullet points."
+          ></textarea>
+        </section>
 
-      <div class="button-row">
-        <button id="init">Init / Download model</button>
-        <button id="reset" disabled>Reset chat</button>
-      </div>
+        <section class="card">
+          <div class="card-header">
+            <h2>Suggested Prompts</h2>
+            <p class="card-subtitle">Control how the selection helper behaves.</p>
+          </div>
+          <div class="field">
+            <label for="suggestionCount">Number to show</label>
+            <div class="range">
+              <input type="range" id="suggestionCount" min="1" max="5" step="1" />
+              <span id="suggestionCountValue" class="range-value"></span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="suggestionTone">Tone</label>
+            <select id="suggestionTone">
+              <option value="neutral">Neutral</option>
+              <option value="friendly">Friendly</option>
+              <option value="professional">Professional</option>
+              <option value="persuasive">Persuasive</option>
+              <option value="casual">Casual</option>
+            </select>
+          </div>
+        </section>
 
-      <div id="status">Status: Not initialized</div>
+        <section class="card">
+          <div class="card-header">
+            <h2>Model Tuning</h2>
+            <p class="card-subtitle">Adjust Gemini Nano generation parameters.</p>
+          </div>
+          <div class="field">
+            <label for="temperature">Temperature</label>
+            <div class="range">
+              <input type="range" id="temperature" min="0" max="2" step="0.1" />
+              <span id="temperatureValue" class="range-value"></span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="topK">Top K</label>
+            <div class="range">
+              <input type="range" id="topK" min="1" max="40" step="1" />
+              <span id="topKValue" class="range-value"></span>
+            </div>
+          </div>
+        </section>
 
-      <div id="progressWrap" class="hidden">
-        <p>Model download progress:</p>
-        <progress id="progress" value="0" max="100"></progress>
-        <small id="progressNote"></small>
-      </div>
-
-      <section class="chat">
-        <h3>Conversation</h3>
-        <div id="chatBox">
-          <div id="chatLog"></div>
+        <div class="actions">
+          <button id="openWorkspace" type="button" class="primary">Open Workspace</button>
+          <button id="resetSettings" type="button" class="secondary">Reset to defaults</button>
         </div>
-      </section>
 
-      <label for="prompt">Message</label>
-      <textarea id="prompt" placeholder="Type your message…"></textarea>
+        <div id="saveStatus" class="save-status" role="status" aria-live="polite"></div>
+      </main>
+    </div>
 
-      <div class="button-row">
-        <button id="send" disabled>Send</button>
-        <button id="stop" disabled>Stop</button>
-      </div>
-    </main>
-
-    <footer>
-      <small>Runs locally via Chrome’s built-in Gemini Nano</small>
-    </footer>
-
-    <script type="module" src="popup.js"></script>
+    <script type="module" src="settings.js"></script>
   </body>
 </html>

@@ -1,195 +1,156 @@
-/* === Base Layout === */
 body {
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    font-size: 14px;
-    margin: 0;
-    padding: 16px;
-    width: 360px;
-    box-sizing: border-box;
-    background: #fafafa;
-    color: #222;
-  }
-  
-  header {
-    text-align: center;
-    margin-bottom: 12px;
-  }
-  
-  h2 {
-    font-size: 18px;
-    margin: 0;
-  }
-  
-  .subtitle {
-    font-size: 12px;
-    color: #666;
-    margin-top: 4px;
-  }
-  
-  main label {
-    display: block;
-    font-weight: 600;
-    margin-top: 12px;
-    margin-bottom: 4px;
-  }
-  
-  input,
-  textarea {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 8px;
-    border-radius: 6px;
-    border: 1px solid #ccc;
-    background: white;
-    font-family: inherit;
-    font-size: 14px;
-  }
-  
-textarea {
-  resize: vertical;
-  min-height: 80px;
+  margin: 0;
+  padding: 0;
+  width: 360px;
+  background: #f5f7fb;
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: #1f2933;
 }
 
-/* === Buttons === */
-.button-row {
-    display: flex;
-    gap: 8px;
-    margin-top: 10px;
-  }
-  
-  button {
-    flex: 1;
-    padding: 8px 10px;
-    border-radius: 6px;
-    border: 1px solid #ccc;
-    background: #fff;
-    cursor: pointer;
-    font-weight: 500;
-    transition: background 0.2s, border-color 0.2s;
-  }
-  
-  button:hover:not(:disabled) {
-    background: #f0f0f0;
-    border-color: #aaa;
-  }
-  
-  button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  
-  /* === Status and Progress === */
-  #status {
-    margin-top: 10px;
-    font-size: 13px;
-    color: #444;
-  }
-  
-  #progressWrap {
-    margin-top: 8px;
-  }
-  
-  .hidden {
-    display: none !important;
-  }
-  
-  progress {
-    width: 100%;
-    height: 12px;
-    margin-top: 4px;
-  }
-  
-  #progressNote {
-    display: block;
-    text-align: right;
-    color: #777;
-    font-size: 11px;
-  }
+.container {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
 
-  /* === Chat === */
-  .chat {
-    margin-top: 16px;
-  }
+.header h1 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.2px;
+}
 
-  .chat h3 {
-    margin: 0 0 8px;
-    font-size: 14px;
-    border-bottom: 1px solid #eee;
-    padding-bottom: 4px;
-  }
+.header p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #516275;
+}
 
-  #chatBox {
-    background: #f6f6f6;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    padding: 8px;
-    height: 200px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
 
-  #chatLog {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
+.card {
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 
-  .chat-message {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 8px;
-    border-radius: 8px;
-    background: white;
-    border: 1px solid #e0e0e0;
-  }
+.card-header h2 {
+  margin: 0;
+  font-size: 15px;
+}
 
-  .chat-message.user {
-    background: #e8f0fe;
-    border-color: #c3d5ff;
-    align-self: flex-end;
-  }
+.card-subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
 
-  .chat-message.assistant {
-    background: #ffffff;
-    align-self: flex-start;
-  }
+textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 120px;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  background: #f8fafc;
+}
 
-  .chat-message.system {
-    background: #f2f2f2;
-    border-style: dashed;
-  }
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 
-  .chat-role {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    color: #5f6368;
-  }
+.field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
 
-  .chat-message.user .chat-role {
-    color: #1a73e8;
-  }
+.range {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 
-  .chat-message.assistant .chat-role {
-    color: #0b8043;
-  }
+input[type="range"] {
+  flex: 1;
+  accent-color: #2563eb;
+}
 
-  .chat-content {
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-size: 13px;
-  }
-  
-  /* === Footer === */
-  footer {
-    text-align: center;
-    font-size: 11px;
-    color: #777;
-    margin-top: 10px;
-    border-top: 1px solid #eee;
-    padding-top: 8px;
-  }
-  
+.range-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1d4ed8;
+  min-width: 32px;
+  text-align: right;
+}
+
+select {
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.actions button {
+  flex: 1;
+  border-radius: 22px;
+  border: none;
+  padding: 10px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.actions .primary {
+  background: linear-gradient(135deg, #2563eb, #4338ca);
+  color: #ffffff;
+  box-shadow: 0 10px 20px rgba(67, 56, 202, 0.25);
+}
+
+.actions .primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.3);
+}
+
+.actions .secondary {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.actions .secondary:hover {
+  transform: translateY(-1px);
+}
+
+.save-status {
+  font-size: 12px;
+  text-align: right;
+  min-height: 18px;
+  color: #0f766e;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}

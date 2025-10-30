@@ -126,11 +126,87 @@ async function requestPromptSuggestions({ text, tone, n }) {
   throw new Error("Unable to reach offscreen document.");
 }
 
+async function deliverPayloadToChat(payload, sender) {
+  const existingTab = await findChatTab();
+  if (existingTab) {
+    await focusChatTab(existingTab);
+    chrome.runtime.sendMessage({ type: MSG.POPUP_PAYLOAD_DELIVER, payload });
+    return "direct";
+  }
+
+  await chrome.storage.session.set({ [STORAGE_KEYS.POPUP_PAYLOAD]: payload });
+  await openChatTab(sender);
+  return "queued";
+}
+
+async function findChatTab() {
+  const targetUrl = chrome.runtime.getURL("src/popup/tab.html");
+  try {
+    const tabs = await chrome.tabs.query({ url: targetUrl });
+    if (Array.isArray(tabs) && tabs.length > 0) {
+      return tabs[0];
+    }
+  } catch (err) {
+    console.warn("tabs.query failed while locating chat tab:", err);
+  }
+  return null;
+}
+
+async function focusChatTab(tab) {
+  if (!tab || typeof tab.id !== "number") return;
+  try {
+    await chrome.tabs.update(tab.id, { active: true });
+  } catch (err) {
+    console.warn("Unable to activate chat tab:", err);
+  }
+  if (typeof tab.windowId === "number") {
+    try {
+      await chrome.windows.update(tab.windowId, { focused: true });
+    } catch (err) {
+      console.warn("Unable to focus chat window:", err);
+    }
+  }
+}
+
+async function openChatTab(sender) {
+  const targetUrl = chrome.runtime.getURL("src/popup/tab.html");
+  const createProps = {
+    url: targetUrl,
+    active: true
+  };
+
+  if (sender?.tab?.windowId) {
+    createProps.windowId = sender.tab.windowId;
+  }
+
+  try {
+    await chrome.tabs.create(createProps);
+  } catch (err) {
+    console.warn("tabs.create failed while opening chat tab:", err);
+    throw err;
+  }
+}
+
 /*
 Is called with a text and tone and "N". The text is the highlighted text that the user selects and the tone 
 is the tone for the model response, and the N is the numebr of responses
 */
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type === "OPEN_POPUP_WINDOW") {
+    const payload = msg.payload ?? {};
+    (async () => {
+      try {
+        const delivered = await deliverPayloadToChat(payload, sender);
+        sendResponse?.({ ok: true, delivered });
+      } catch (err) {
+        console.warn("OPEN_POPUP_WINDOW error:", err);
+        await chrome.storage.session.set({ [STORAGE_KEYS.POPUP_PAYLOAD]: payload });
+        sendResponse?.({ ok: false, error: String(err?.message || err) });
+      }
+    })();
+    return true;
+  }
+
   if (msg?.type === "SUGGEST_PROMPTS") {
     const { text, tone, n } = msg || {};
     (async () => {
@@ -150,7 +226,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
-/* 
+/*
 This listener take a "prompt" and a "pageContent". I will then use this in the popup and generate the resopnse for the user.
 */
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -159,22 +235,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     (async () => {
       try {
-        const views = await chrome.runtime.getViews({ type: "popup" });
-
-        if (views.length > 0) {
-          // Popup already open → deliver immediately
-          chrome.runtime.sendMessage({ type: "POPUP_PAYLOAD_DELIVER", payload });
-        } else {
-          // Popup closed → cache then open it
-          await chrome.storage.session.set({ [STORAGE_KEYS.POPUP_PAYLOAD]: payload });
-
-          await chrome.action.openPopup(
-            sender?.tab?.windowId ? { windowId: sender.tab.windowId } : {}
-          );
-          // When the popup initializes, it will ask for POPUP_READY and we'll deliver from storage.
-        }
-
-        sendResponse({ ok: true });
+        const delivered = await deliverPayloadToChat(payload, sender);
+        sendResponse({ ok: true, delivered });
       } catch (err) {
         console.warn("openPopup error:", err);
         // Fallback: if openPopup fails, at least cache so the popup can pull it next time it opens.

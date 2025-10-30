@@ -1,14 +1,15 @@
-import { DEFAULT_PARAMS, UI_STRINGS } from "../config.js";
+import { UI_STRINGS } from "../config.js";
 import { ModelClient } from "../ai/modelClient.js";
 import { els } from "../ui/dom.js";
 import { setStatus, showProgress, setProgress } from "../ui/status.js";
 import { getAvailability } from "../ai/apiShim.js";
+import { MSG, USER_SETTINGS_KEYS, USER_SETTINGS_DEFAULTS } from "../ai/constants.js";
 
 const client = new ModelClient();
 
 const STORAGE_KEYS = {
-  SYSTEM_PROMPT: "systemPrompt",
-  MODEL_READY: "modelReady"
+  MODEL_READY: "modelReady",
+  POPUP_PAYLOAD: "popupPayload"
 };
 
 const hasChromeSessionStorage =
@@ -25,21 +26,48 @@ function debounce(fn, delay = 300) {
   };
 }
 
+const hasChromeSyncStorage =
+  typeof chrome !== "undefined" &&
+  !!chrome.storage &&
+  !!chrome.storage.sync &&
+  typeof chrome.storage.sync.get === "function";
+
 const storage = (() => {
   return {
     async get(key) {
-      if (hasChromeSessionStorage) {
-        const obj = await chrome.storage.session.get(key);
-        return obj[key];
+      if (hasChromeSyncStorage) {
+        const value = await new Promise((resolve) => {
+          chrome.storage.sync.get(key, (obj) => {
+            if (chrome.runtime?.lastError) {
+              resolve(undefined);
+              return;
+            }
+            resolve(obj?.[key]);
+          });
+        });
+        if (value !== undefined) return value;
       }
-      return Promise.resolve(localStorage.getItem(key) ?? "");
+      const raw = localStorage.getItem(key);
+      if (raw === null) return "";
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw;
+      }
     },
     async set(key, value) {
-      if (hasChromeSessionStorage) {
-        await chrome.storage.session.set({ [key]: value });
-        return;
+      if (hasChromeSyncStorage) {
+        await new Promise((resolve) => {
+          chrome.storage.sync.set({ [key]: value }, () => {
+            if (chrome.runtime?.lastError) {
+              console.warn("Failed to persist setting", chrome.runtime.lastError);
+            }
+            resolve();
+          });
+        });
+      } else {
+        localStorage.setItem(key, JSON.stringify(value));
       }
-      localStorage.setItem(key, value);
     }
   };
 })();
@@ -93,6 +121,32 @@ const sessionStore = (() => {
 
 let conversation = [];
 let isStreaming = false;
+const pendingAutoRuns = [];
+let isProcessingAutoRun = false;
+
+if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg?.type === MSG.POPUP_PAYLOAD_DELIVER) {
+      handleDeliveredPayload(msg.payload);
+    }
+  });
+}
+
+if (hasChromeSyncStorage && typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "sync") return;
+    if (Object.prototype.hasOwnProperty.call(changes, USER_SETTINGS_KEYS.SYSTEM_PROMPT)) {
+      const change = changes[USER_SETTINGS_KEYS.SYSTEM_PROMPT];
+      const newValue = typeof change?.newValue === "string"
+        ? change.newValue
+        : USER_SETTINGS_DEFAULTS[USER_SETTINGS_KEYS.SYSTEM_PROMPT];
+      if (document.activeElement !== els.system) {
+        els.system.value = newValue;
+        els.system.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
+  });
+}
 
 function updateControls() {
   if (client.isReady) {
@@ -121,7 +175,6 @@ async function ensureModelReady({ auto = false } = {}) {
   try {
     await client.ensureReady({
       systemText: els.system.value,
-      params: DEFAULT_PARAMS,
       onStatus: setStatus,
       onProgress: setProgress,
     });
@@ -198,18 +251,19 @@ async function restoreSystemPrompt() {
   const promptEl = els.system;
 
   try {
-    const saved = (await storage.get(STORAGE_KEYS.SYSTEM_PROMPT)) ?? "";
-    if (saved) {
-      promptEl.value = saved;
-      promptEl.dispatchEvent(new Event("input", { bubbles: true }));
-    }
+    const storedValue = await storage.get(USER_SETTINGS_KEYS.SYSTEM_PROMPT);
+    const value = storedValue !== undefined && storedValue !== null
+      ? storedValue
+      : USER_SETTINGS_DEFAULTS[USER_SETTINGS_KEYS.SYSTEM_PROMPT];
+    promptEl.value = value;
+    promptEl.dispatchEvent(new Event("input", { bubbles: true }));
   } catch (e) {
     console.warn("Failed to restore prompt:", e);
   }
 
   const saveDraft = debounce(async (value) => {
     try {
-      await storage.set(STORAGE_KEYS.SYSTEM_PROMPT, value);
+      await storage.set(USER_SETTINGS_KEYS.SYSTEM_PROMPT, value);
     } catch (e) {
       console.warn("Failed to save prompt:", e);
     }
@@ -220,7 +274,7 @@ async function restoreSystemPrompt() {
   });
 
   promptEl.addEventListener("blur", () => {
-    storage.set(STORAGE_KEYS.SYSTEM_PROMPT, promptEl.value).catch(() => {});
+    storage.set(USER_SETTINGS_KEYS.SYSTEM_PROMPT, promptEl.value).catch(() => {});
   });
 }
 
@@ -255,6 +309,8 @@ function resetConversationUI() {
   conversation = [];
   els.chatLog.innerHTML = "";
   scrollChatToBottom();
+  pendingAutoRuns.length = 0;
+  isProcessingAutoRun = false;
 }
 
 function roleLabel(role) {
@@ -278,11 +334,101 @@ function buildPromptFromConversation() {
   return lines.join("\n");
 }
 
+function handleDeliveredPayload(payload) {
+  if (!payload || typeof payload !== "object") return;
+  if (payload.kind === "run-selection-prompt") {
+    queueAutoRun(payload);
+    return;
+  }
+
+  const legacyPrompt = typeof payload.prompt === "string" ? payload.prompt : "";
+  const legacyContext = typeof payload.pageContent === "string" ? payload.pageContent : "";
+  if (legacyPrompt || legacyContext) {
+    queueAutoRun({
+      kind: "run-selection-prompt",
+      suggestion: legacyPrompt,
+      contextText: legacyContext,
+      truncatedContext: legacyContext
+    });
+  }
+}
+
+function queueAutoRun(payload) {
+  pendingAutoRuns.push(payload);
+  processPendingAutoRuns();
+}
+
+async function loadCachedPayload() {
+  if (!hasChromeSessionStorage) return;
+  try {
+    const obj = await chrome.storage.session.get(STORAGE_KEYS.POPUP_PAYLOAD);
+    const payload = obj?.[STORAGE_KEYS.POPUP_PAYLOAD];
+    if (!payload) return;
+    await chrome.storage.session.remove(STORAGE_KEYS.POPUP_PAYLOAD);
+    handleDeliveredPayload(payload);
+  } catch (err) {
+    console.warn("Failed to load cached payload:", err);
+  }
+}
+
+function processPendingAutoRuns() {
+  if (isStreaming || isProcessingAutoRun) return;
+  const next = pendingAutoRuns.shift();
+  if (!next) return;
+  isProcessingAutoRun = true;
+  runSelectionPrompt(next)
+    .catch((err) => {
+      console.warn("Auto-run failed:", err);
+    })
+    .finally(() => {
+      isProcessingAutoRun = false;
+      if (!isStreaming) {
+        processPendingAutoRuns();
+      }
+    });
+}
+
+async function runSelectionPrompt(payload) {
+  const suggestion = String(payload.suggestion || "").trim();
+  const context =
+    String(payload.truncatedContext || payload.contextText || "").trim();
+  const pageTitle = String(payload.pageTitle || "").trim();
+  const pageUrl = String(payload.pageUrl || "").trim();
+
+  const lines = [];
+  if (suggestion) lines.push(suggestion);
+  if (context) {
+    lines.push("", "Context:", context);
+  }
+  if (pageTitle || pageUrl) {
+    const metaParts = [];
+    if (pageTitle) metaParts.push(pageTitle);
+    if (pageUrl) metaParts.push(pageUrl);
+    lines.push("", `Source: ${metaParts.join(" — ")}`);
+  }
+
+  const combined = lines.join("\n").trim();
+  if (!combined) return;
+
+  await sendChatMessage(combined, { displayInInput: false });
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   updateControls();
   await restoreSystemPrompt();
   resetConversationUI();
   await maybeAutoInitModel();
+  await loadCachedPayload();
+  if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+    try {
+      chrome.runtime.sendMessage({ type: MSG.POPUP_READY }, () => {
+        void chrome.runtime.lastError;
+      });
+    } catch (err) {
+      console.warn("POPUP_READY dispatch failed:", err);
+    }
+  }
+  processPendingAutoRuns();
 });
 
 els.init.addEventListener("click", async () => {
@@ -295,9 +441,13 @@ els.init.addEventListener("click", async () => {
   }
 });
 
-async function sendChatMessage() {
-  const userText = els.prompt.value.trim();
-  if (!userText || isStreaming) return;
+async function sendChatMessage(userTextOverride, { displayInInput = false } = {}) {
+  if (isStreaming) return;
+
+  const overrideProvided = typeof userTextOverride === "string";
+  const rawText = overrideProvided ? userTextOverride : els.prompt.value;
+  const userText = (rawText || "").trim();
+  if (!userText) return;
 
   if (!client.isReady) {
     try {
@@ -308,7 +458,14 @@ async function sendChatMessage() {
     }
   }
 
-  els.prompt.value = "";
+  if (!overrideProvided) {
+    els.prompt.value = "";
+  } else if (displayInInput) {
+    els.prompt.value = userTextOverride;
+  } else {
+    els.prompt.value = "";
+  }
+
   const userEntry = { role: "user", content: userText };
   createChatMessage("user", userText);
   conversation.push(userEntry);
@@ -344,6 +501,7 @@ async function sendChatMessage() {
     }
     isStreaming = false;
     updateControls();
+    processPendingAutoRuns();
   }
 }
 
@@ -370,6 +528,7 @@ els.stop.addEventListener("click", async () => {
   } catch (err) {
     console.warn("Re-init after stop failed:", err);
   }
+  processPendingAutoRuns();
 });
 
 els.reset.addEventListener("click", async () => {
