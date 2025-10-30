@@ -2,6 +2,8 @@ import {
   USER_SETTINGS_KEYS,
   USER_SETTINGS_DEFAULTS,
 } from "../ai/constants.js";
+import { ModelClient } from "../ai/modelClient.js";
+import { getAvailability } from "../ai/apiShim.js";
 
 const storageArea = (() => {
   if (typeof chrome === "undefined" || !chrome.storage) return null;
@@ -16,6 +18,68 @@ const storageArea = (() => {
 
 const localStorageFallback = typeof window !== "undefined" ? window.localStorage : null;
 const VALID_TONES = ["neutral", "friendly", "professional", "persuasive", "casual"];
+const STORAGE_KEYS = {
+  MODEL_READY: "modelReady",
+};
+
+const modelClient = new ModelClient();
+
+const hasChromeSessionStorage =
+  typeof chrome !== "undefined" &&
+  !!chrome.storage &&
+  !!chrome.storage.session &&
+  typeof chrome.storage.session.get === "function";
+
+const sessionStore = (() => {
+  if (hasChromeSessionStorage) {
+    return {
+      async get(key) {
+        const obj = await chrome.storage.session.get(key);
+        return Boolean(obj[key]);
+      },
+      async set(key, value) {
+        if (!value) {
+          await chrome.storage.session.remove(key);
+          return;
+        }
+        await chrome.storage.session.set({ [key]: true });
+      },
+      async remove(key) {
+        await chrome.storage.session.remove(key);
+      },
+    };
+  }
+
+  let fallback = null;
+  try {
+    fallback = typeof window !== "undefined" ? window.sessionStorage : null;
+  } catch {
+    fallback = null;
+  }
+
+  return {
+    async get(key) {
+      if (!fallback) return false;
+      return fallback.getItem(key) === "true";
+    },
+    async set(key, value) {
+      if (!fallback) return;
+      if (value) {
+        fallback.setItem(key, "true");
+      } else {
+        fallback.removeItem(key);
+      }
+    },
+    async remove(key) {
+      if (!fallback) return;
+      fallback.removeItem(key);
+    },
+  };
+})();
+
+let modelReady = false;
+let initInProgress = false;
+let disableInitButton = false;
 
 const els = {
   system: document.getElementById("system"),
@@ -28,7 +92,12 @@ const els = {
   topKValue: document.getElementById("topKValue"),
   openWorkspace: document.getElementById("openWorkspace"),
   reset: document.getElementById("resetSettings"),
-  saveStatus: document.getElementById("saveStatus")
+  saveStatus: document.getElementById("saveStatus"),
+  initModel: document.getElementById("initModel"),
+  initStatus: document.getElementById("initStatus"),
+  initProgressWrap: document.getElementById("initProgressWrap"),
+  initProgress: document.getElementById("initProgress"),
+  initProgressNote: document.getElementById("initProgressNote"),
 };
 
 const SAVE_DEBOUNCE_MS = 300;
@@ -203,6 +272,143 @@ function resetToDefaults() {
   }).then(() => showStatus("Settings reset"));
 }
 
+function setInitStatus(message) {
+  if (!els.initStatus) return;
+  const text = typeof message === "string" ? message.trim() : "";
+  if (!text) {
+    els.initStatus.textContent = "Status: Not initialized";
+    return;
+  }
+  els.initStatus.textContent = text.startsWith("Status:") ? text : `Status: ${text}`;
+}
+
+function showInitProgress(show) {
+  if (!els.initProgressWrap) return;
+  els.initProgressWrap.classList.toggle("hidden", !show);
+  if (!show) {
+    if (els.initProgress) {
+      els.initProgress.value = 0;
+    }
+    if (els.initProgressNote) {
+      els.initProgressNote.textContent = "";
+    }
+  }
+}
+
+function setInitProgress(pct, loadedFraction) {
+  if (els.initProgress) {
+    const value = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : 0;
+    els.initProgress.value = value;
+  }
+  if (els.initProgressNote) {
+    if (typeof loadedFraction === "number") {
+      els.initProgressNote.textContent = `Loaded: ${(loadedFraction * 100).toFixed(1)}%`;
+    } else if (!initInProgress) {
+      els.initProgressNote.textContent = "";
+    }
+  }
+}
+
+function updateInitControls() {
+  if (!els.initModel) return;
+  els.initModel.disabled = disableInitButton || initInProgress || modelReady;
+}
+
+async function persistModelReadyFlag(isReady) {
+  try {
+    await sessionStore.set(STORAGE_KEYS.MODEL_READY, isReady);
+  } catch (err) {
+    console.warn("Unable to persist model ready flag:", err);
+  }
+}
+
+async function ensureModelReadyFromSettings() {
+  if (!els.initModel || initInProgress) return;
+
+  initInProgress = true;
+  disableInitButton = true;
+  setInitStatus("Preparing model…");
+  setInitProgress(0);
+  showInitProgress(true);
+  updateInitControls();
+
+  try {
+    await modelClient.ensureReady({
+      systemText: els.system?.value,
+      onStatus: (status) => setInitStatus(status),
+      onProgress: (pct, fraction) => {
+        setInitProgress(pct, fraction);
+        showInitProgress(true);
+      },
+    });
+    modelReady = true;
+    await persistModelReadyFlag(true);
+    setInitStatus("Model ready.");
+  } catch (err) {
+    modelReady = false;
+    await persistModelReadyFlag(false);
+    const message = err?.message ? String(err.message) : String(err ?? "Unknown error");
+    setInitStatus(`Init error: ${message}`);
+  } finally {
+    initInProgress = false;
+    disableInitButton = false;
+    showInitProgress(false);
+    if (!modelReady) {
+      setInitProgress(0);
+    }
+    updateInitControls();
+  }
+}
+
+async function refreshModelStatus() {
+  if (!els.initModel) return;
+  disableInitButton = false;
+
+  try {
+    const storedReady = await sessionStore.get(STORAGE_KEYS.MODEL_READY);
+    modelReady = modelClient.isReady || Boolean(storedReady);
+  } catch (err) {
+    modelReady = modelClient.isReady;
+    console.warn("Model ready flag check failed:", err);
+  }
+
+  if (modelReady) {
+    setInitStatus("Model ready.");
+    showInitProgress(false);
+    updateInitControls();
+    return;
+  }
+
+  try {
+    const availability = await getAvailability();
+    switch (availability) {
+      case "available":
+        setInitStatus("Model downloaded — ready to initialize.");
+        break;
+      case "downloading":
+        setInitStatus("Model download in progress. Check back shortly.");
+        disableInitButton = true;
+        showInitProgress(true);
+        break;
+      case "downloadable":
+        setInitStatus("Click 'Init / Download model' to download Gemini Nano.");
+        break;
+      default:
+        setInitStatus("Model unavailable on this device.");
+        disableInitButton = true;
+        break;
+    }
+  } catch (err) {
+    const message = err?.message ? String(err.message) : String(err ?? "Unknown error");
+    setInitStatus(`Availability check failed: ${message}`);
+  } finally {
+    updateInitControls();
+    if (!initInProgress && !disableInitButton) {
+      showInitProgress(false);
+    }
+  }
+}
+
 function openWorkspace() {
   const fallbackUrl = chrome?.runtime?.getURL
     ? chrome.runtime.getURL("src/popup/tab.html")
@@ -264,4 +470,10 @@ function openWorkspace() {
   els.openWorkspace?.addEventListener("click", () => {
     openWorkspace();
   });
+
+  els.initModel?.addEventListener("click", () => {
+    ensureModelReadyFromSettings();
+  });
+
+  await refreshModelStatus();
 })();

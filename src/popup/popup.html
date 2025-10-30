@@ -51,6 +51,24 @@
 
         <section class="card">
           <div class="card-header">
+            <h2>Model Setup</h2>
+            <p class="card-subtitle">Download and initialize Gemini Nano locally.</p>
+          </div>
+          <div class="model-controls">
+            <button id="initModel" type="button" class="primary">Init / Download model</button>
+            <div id="initStatus" class="model-status" role="status" aria-live="polite">
+              Status: Not initialized
+            </div>
+            <div id="initProgressWrap" class="model-progress hidden">
+              <label for="initProgress">Model download progress</label>
+              <progress id="initProgress" value="0" max="100"></progress>
+              <small id="initProgressNote"></small>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
             <h2>Model Tuning</h2>
             <p class="card-subtitle">Adjust Gemini Nano generation parameters.</p>
           </div>

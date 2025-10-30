@@ -154,3 +154,57 @@ button:disabled {
   box-shadow: none;
   transform: none;
 }
+
+.model-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.model-controls button {
+  align-self: flex-start;
+  border-radius: 22px;
+  border: none;
+  padding: 10px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  background: linear-gradient(135deg, #2563eb, #4338ca);
+  color: #ffffff;
+  box-shadow: 0 10px 20px rgba(67, 56, 202, 0.25);
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.model-controls button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.3);
+}
+
+.model-status {
+  font-size: 12px;
+  color: #334155;
+}
+
+.model-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.model-progress.hidden {
+  display: none;
+}
+
+.model-progress progress {
+  width: 100%;
+}
+
+.model-progress label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.model-progress small {
+  font-size: 11px;
+  color: #64748b;
+}
